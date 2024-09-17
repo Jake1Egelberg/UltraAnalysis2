@@ -104,6 +104,9 @@ bothPlots <- ggplot(testData[[1]][[1]],aes(x=r,y=Ar))+
   )
 sectorLabel <- "testing"
 
+# Define colros to use
+colorVec <- rainbow(10)
+
 
 # Define starting vars
 defineVars <- function(){
@@ -330,6 +333,43 @@ function(input, output, session) {
     
   })
   
+  # Function to render scan plot
+  renderScanPlot <- function(){
+    
+    currentScanPlot <- ggplot(currentScanData,aes(x=r,y=Ar))+
+      geom_point()+
+      theme_prism()
+    
+    # Check which selections are in the current scan
+    savedSectors <- bind_rows(savedSectors)
+    if(nrow(savedSectors)>0){
+      
+      inScan <- subset(savedSectors,Scan==selectedScan)
+      
+      # Get data within ranges
+      dataInRange <- lapply(1:nrow(inScan),function(x){
+        
+        row <- inScan[x,]
+        sub <- subset(currentScanData,r>row$Min&r<row$Max)
+        sub$Color <- row$Color
+        return(sub)
+        
+      }) %>% bind_rows()
+      
+      currentScanPlot <- currentScanPlot + 
+        geom_point(data=dataInRange,aes(x=r,y=Ar,col=Color))+
+        scale_color_identity()
+      
+    }
+    
+    
+    #Render output
+    output$currentScanPlotOutput <- renderPlot(
+      currentScanPlot,width=600,height=300
+    )
+    
+  }
+  
   # When user selects a scan to see up close
   observeEvent(input$selectScan,{
     .GlobalEnv$selectedScan <- input$selectScan
@@ -339,14 +379,8 @@ function(input, output, session) {
       .GlobalEnv$currentScanData <- scanData[[as.numeric(selectedScan)]]
       
       # Plot
-      currentScanPlot <- ggplot(currentScanData,aes(x=r,y=Ar))+
-        geom_point()+
-        theme_prism()
-      
-      #Render output
-      output$currentScanPlotOutput <- renderPlot(
-        currentScanPlot,width=600,height=300
-      )
+      renderScanPlot()
+
     }
     
   })
@@ -465,7 +499,7 @@ function(input, output, session) {
               p(ifelse(tmpSector$Receptor=="",0,tmpSector$Receptor),style='font-size:10px;')
             ),
             div(class='column',style='align-items:center;width:15%;justify-content:center;margin-left:10px',
-              actionButton(sectorID,label="🗑️",style='font-size:12px;')
+              actionButton(sectorID,label="🗑️",style=paste('font-size:12px;opacity:0.5;background-color:',tmpSector$Color,sep=""))
             )
           ) # End row
         })
@@ -476,11 +510,14 @@ function(input, output, session) {
   renderSavedSelections()
   
   # Define function to edit a secotr
-  editSelectedSector <- function(sectorNum){
-    sectorToEdit <- savedSectors[[sectorNum]]
-    savedSectors <- savedSectors[-sectorNum]
+  editSelectedSector <- function(receptorID){
+    ids <- lapply(savedSectors,'[[',6) %>% unlist()
+    savedSectors <- savedSectors[-which(ids==receptorID)]
     .GlobalEnv$savedSectors <- savedSectors
+    
+    #Update UI
     renderSavedSelections()
+    renderScanPlot()
   }
   
   # When user saves a selection
@@ -491,9 +528,12 @@ function(input, output, session) {
     receptorConcentration <- input$receptorInput
     currentSectorDf$Receptor <- receptorConcentration
     
-    # DEfine receptor ID
-    receptorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
-    currentSectorDf$ID <- receptorID
+    # Define sector ID
+    sectorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+    currentSectorDf$ID <- sectorID
+    
+    # Define sector color
+    currentSectorDf$Color <- sample(colorVec,1)
     
     newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
     updateLog(newSectorLog)
@@ -503,13 +543,15 @@ function(input, output, session) {
     .GlobalEnv$savedSectors <- savedSectors
   
     # Create hook for editing 
-    observeEvent(eval(parse(text=paste('input$',receptorID,sep=""))),{
-      sectorNum <- length(savedSectors)
-      editSelectedSector(sectorNum)
+    observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+      editSelectedSector(sectorID)
     })
 
     # Update UI
     renderSavedSelections()
+    
+    # Update plot
+    renderScanPlot()
     
     
   })
