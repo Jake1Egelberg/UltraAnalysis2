@@ -110,9 +110,9 @@ defineVars <- function(){
   .GlobalEnv$logText <- NULL
   .GlobalEnv$psvValue <- NULL
   .GlobalEnv$sdValue <- NULL
-  .GlobalEnv$scansToAnalyze <- NULL
-  .GlobalEnv$scanData <- NULL
-  .GlobalEnv$savedSectors <- list()
+  .GlobalEnv$scansToAnalyze <- 1
+  .GlobalEnv$scanData <- testData[[1]]
+  .GlobalEnv$savedSectors <- NULL
 }
 defineVars()
 
@@ -446,24 +446,27 @@ function(input, output, session) {
         lapply(1:length(savedSectors),function(x){
           
           tmpSector <- savedSectors[[x]]
-          removeSectorID <- paste('removeSector',x,sep="")
+          sectorID <- paste('sector',x,sep="")
           
           div(
             class='row',style='margin:5px;width:100%;',
             div(
-              class='column',style='align-items:center;width:25%',
+              class='column',style='align-items:center;width:15%',
               p(HTML("<b>Scan</b>"),style='font-size:12px;'),
               p(tmpSector$Scan,style='font-size:10px;')
             ),
             div(
-              class='column',style='align-items:center;width:50%',
+              class='column',style='align-items:center;width:45%',
               p(HTML("<b>Range</b>"),style='font-size:12px;'),
               p(paste(tmpSector$Min,' - ',tmpSector$Max,sep=""),style='font-size:10px;')
             ),
             div(
-              class='column',style='align-items:center;width:25%',
+              class='column',style='align-items:center;width:15%',
               p(HTML("<b>uM</b>"),style='font-size:12px;'),
               p(ifelse(tmpSector$Receptor=="",0,tmpSector$Receptor),style='font-size:10px;')
+            ),
+            div(class='column',style='align-items:center;width:15%;justify-content:center;margin-left:10px',
+              actionButton(sectorID,label="🗑️",style='font-size:12px;')
             )
           ) # End row
         })
@@ -471,20 +474,15 @@ function(input, output, session) {
       
     })
   }
+  renderSavedSelections()
   
-  # When a user undos a selection
-  observeEvent(input$undoSector,{
-    
-    
-    removeSectorLog <- paste("Removed sector: Scan ",savedSectors[[length(savedSectors)]]$Scan," Min ",savedSectors[[length(savedSectors)]]$Min,' Max ',savedSectors[[length(savedSectors)]]$Max, " n = ",savedSectors[[length(savedSectors)]]$n,sep="")
-    updateLog(removeSectorLog)
-    
-    
-    savedSectors <- savedSectors[-length(savedSectors)]
+  # Define function to edit a secotr
+  editSelectedSector <- function(sectorNum){
+    sectorToEdit <- savedSectors[[sectorNum]]
+    savedSectors <- savedSectors[-sectorNum]
     .GlobalEnv$savedSectors <- savedSectors
     renderSavedSelections()
-    
-  })
+  }
   
   # When user saves a selection
   observeEvent(input$saveSector,{
@@ -500,8 +498,13 @@ function(input, output, session) {
     # Save as list
     savedSectors[[length(savedSectors)+1]] <- currentSectorDf
     .GlobalEnv$savedSectors <- savedSectors
-    
-    print(savedSectors)
+  
+    # Create hook for editing 
+    sectorID <- paste('sector',length(savedSectors),sep="")
+    observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+      sectorNum <- length(savedSectors)
+      editSelectedSector(sectorNum)
+    })
     
     # Update UI
     renderSavedSelections()

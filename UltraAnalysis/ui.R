@@ -4,7 +4,6 @@ library(stringr)
 library(ggplot2)
 library(ggprism)
 library(dplyr)
-library(plotly)
 library(magick)
 library(cowplot)
 
@@ -41,7 +40,7 @@ fluidPage(
         uiOutput('fit')
       )
     ),
-    selected='upload'
+    selected='process'
   ),
   uiOutput('log')
 )

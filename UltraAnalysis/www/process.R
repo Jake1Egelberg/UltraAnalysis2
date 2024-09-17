@@ -6,16 +6,7 @@ div(
     p('Included scans',class='header'),
     selectInput('selectScan',NULL,choices=scansToAnalyze,multiple=FALSE,width=300),
     
-    div(class='row',style='margin:2px',
-      div(
-        class='column',
-        p('Saved sectors',class='header')
-      ),
-      div(
-        class='column',style='margin:0 0 0 auto',
-        actionButton('undoSector',"⬅️ Undo",style='font-size:10px')
-      )
-    ),
+    p('Saved sectors',class='header'),
     
     div(
       style='margin:5px;height:200px;overflow-y:scroll',
