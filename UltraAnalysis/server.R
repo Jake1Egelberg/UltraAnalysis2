@@ -432,7 +432,7 @@ function(input, output, session) {
 
   # Function to render saved selections
   renderSavedSelections <- function(){
-    
+    print(savedSectors)
     if(length(savedSectors)==0){
       output$savedSectorUI <- NULL
       return()
@@ -441,12 +441,11 @@ function(input, output, session) {
     # Update UI
     output$savedSectorUI <- renderUI({
       
-      
       div(class='column',style='align-items:center;width;100%;',
         lapply(1:length(savedSectors),function(x){
           
           tmpSector <- savedSectors[[x]]
-          sectorID <- paste('sector',x,sep="")
+          sectorID <- tmpSector$ID
           
           div(
             class='row',style='margin:5px;width:100%;',
@@ -492,6 +491,10 @@ function(input, output, session) {
     receptorConcentration <- input$receptorInput
     currentSectorDf$Receptor <- receptorConcentration
     
+    # DEfine receptor ID
+    receptorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+    currentSectorDf$ID <- receptorID
+    
     newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
     updateLog(newSectorLog)
     
@@ -500,12 +503,11 @@ function(input, output, session) {
     .GlobalEnv$savedSectors <- savedSectors
   
     # Create hook for editing 
-    sectorID <- paste('sector',length(savedSectors),sep="")
-    observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+    observeEvent(eval(parse(text=paste('input$',receptorID,sep=""))),{
       sectorNum <- length(savedSectors)
       editSelectedSector(sectorNum)
     })
-    
+
     # Update UI
     renderSavedSelections()
     
