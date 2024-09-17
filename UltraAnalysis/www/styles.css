@@ -1,0 +1,89 @@
+
+ /* style tabs */
+  
+  .nav-tabs {
+      background-color:#E59EDD;
+      color:#FFFFFF;
+      padding:10px;
+      left:0;
+      top:0;
+      width:100%;
+      position:fixed;
+    }
+    
+   /* style selected tab when hovering */
+  .nav-tabs>li.active>a:hover, .nav-tabs>li>a:hover,.nav-tabs>li.active>a, .nav-tabs>li.active>a:focus,.nav-tabs>li.active>a:active{
+    background-color:#7030A0;
+    border: 1px solid #002060;
+    color:#FFFFFF;
+    border-radius:10px;
+  }
+  
+  /* style unselected tab*/
+  .nav-tabs>li>a{
+    background-color:#D86ECC;
+    color:#FFFFFF;
+    border: 1px solid #002060;
+    border-radius:10px;
+    margin:0 5px 0 5px;
+  }
+  
+/* style button */
+
+  .btn-default {
+    background-color:#4E95D9;
+    color:#FFFFFF;
+    font-weight:bold;
+  }
+  
+  .form-control{
+    background-color:#FFFFFF;
+    color:black;
+    font-weight:bold;
+  }
+
+/* style flex */
+
+  .row {
+    display:flex;
+  }
+  
+  .column {
+    display:flex;
+    flex-direction:column;
+  }
+  
+ /* style text */
+   
+   .body {
+     color: #000000;
+     font-size: 16px;
+   }
+   
+   span {
+     color: #000000;
+     font-size: 16px;
+   }
+   
+   .header {
+     color: #002060;
+     font-size: 16px;
+     font-weight: bold;
+   }
+   
+   .button {
+     color: #FFFFFF;
+     font-size: 16px;
+   }
+   
+   .log {
+     color: #000000;
+     font-size: 16px;
+   }
+   
+
+ 
+ 
+ 
+ 
+ 

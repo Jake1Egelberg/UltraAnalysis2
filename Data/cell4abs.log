@@ -1,0 +1,117 @@
+XL-I Version 6.2 (1383022715) Cell 4 Absorbance Scan Log
+Log & data file folder: C:\xlidata\Lemmon and Ferguson Lab\James\041224\192329
+Log file name: cell4abs.log
+Log created: 04/13/24 @ 10:47:17
+Scan settings file name: C:\xlidata\Lemmon and Ferguson Lab\James\Equilibirum_4Speed.SCN
+Step scan(s) from 5.8 - 7.3 cm @ 0.002 intervals and 5 replicate(s)
+
+Scan(s) started 04/13/24 @ 10:47:17, delay: 00:00:00, interval: 00:00:00
+speed: 06000, time: 0055326, temp: 20.0, w2t: 2.19E+010
+
+Scan sequence 00001 started 04/13/24 @ 10:47:17, file name: 00001.RA4
+speed: 06000, time: 0055326, temp: 20.0, w2t: 2.19E+010
+Scan sequence 00001 saved 04/13/24 @ 10:55:59, elapsed time: 00:08:42
+
+Scan sequence 00002 started 04/13/24 @ 10:55:59, file name: 00002.RA4
+speed: 06000, time: 0055848, temp: 20.0, w2t: 2.21E+010
+Scan sequence 00002 saved 04/13/24 @ 11:02:12, elapsed time: 00:06:13
+
+Scan sequence 00003 started 04/13/24 @ 11:02:12, file name: 00003.RA4
+speed: 06000, time: 0056228, temp: 20.0, w2t: 2.22E+010
+Scan sequence 00003 saved 04/13/24 @ 11:08:58, elapsed time: 00:06:46
+
+Scan sequence 00004 started 04/13/24 @ 12:44:50, file name: 00004.RA4
+speed: 06000, time: 0062373, temp: 20.0, w2t: 2.47E+010
+Scan sequence 00004 saved 04/13/24 @ 12:51:28, elapsed time: 00:06:38
+
+Scan sequence 00005 started 04/13/24 @ 12:51:28, file name: 00005.RA4
+speed: 06000, time: 0062769, temp: 20.0, w2t: 2.48E+010
+Scan sequence 00005 saved 04/13/24 @ 12:57:32, elapsed time: 00:06:04
+
+Scan sequence 00006 started 04/13/24 @ 12:57:32, file name: 00006.RA4
+speed: 06000, time: 0063137, temp: 20.0, w2t: 2.50E+010
+Scan sequence 00006 saved 04/13/24 @ 13:05:48, elapsed time: 00:08:16
+
+Scan sequence 00007 started 04/14/24 @ 03:48:54, file name: 00007.RA4
+speed: 09000, time: 0116545, temp: 20.0, w2t: 7.16E+010
+Scan sequence 00007 saved 04/14/24 @ 03:57:29, elapsed time: 00:08:35
+
+Scan sequence 00008 started 04/14/24 @ 03:57:29, file name: 00008.RA4
+speed: 09000, time: 0117057, temp: 20.0, w2t: 7.21E+010
+Scan sequence 00008 saved 04/14/24 @ 04:03:41, elapsed time: 00:06:12
+
+Scan sequence 00009 started 04/14/24 @ 04:03:41, file name: 00009.RA4
+speed: 09000, time: 0117434, temp: 20.0, w2t: 7.24E+010
+Scan sequence 00009 saved 04/14/24 @ 04:11:51, elapsed time: 00:08:10
+
+Scan sequence 00010 started 04/14/24 @ 05:46:37, file name: 00010.RA4
+speed: 09000, time: 0123600, temp: 20.0, w2t: 7.79E+010
+Scan sequence 00010 saved 04/14/24 @ 05:55:12, elapsed time: 00:08:35
+
+Scan sequence 00011 started 04/14/24 @ 05:55:12, file name: 00011.RA4
+speed: 09000, time: 0124113, temp: 20.0, w2t: 7.84E+010
+Scan sequence 00011 saved 04/14/24 @ 06:05:31, elapsed time: 00:10:19
+
+Scan sequence 00012 started 04/14/24 @ 06:05:31, file name: 00012.RA4
+speed: 09000, time: 0124733, temp: 20.0, w2t: 7.89E+010
+Scan sequence 00012 saved 04/14/24 @ 06:12:55, elapsed time: 00:07:24
+
+Scan sequence 00013 started 04/14/24 @ 20:44:40, file name: 00013.RA4
+speed: 12000, time: 0177412, temp: 20.0, w2t: 1.61E+011
+Scan sequence 00013 saved 04/14/24 @ 20:50:03, elapsed time: 00:05:23
+
+Scan sequence 00014 started 04/14/24 @ 20:50:03, file name: 00014.RA4
+speed: 12000, time: 0177736, temp: 20.0, w2t: 1.62E+011
+Scan sequence 00014 saved 04/14/24 @ 20:56:55, elapsed time: 00:06:52
+
+Scan sequence 00015 started 04/14/24 @ 20:56:55, file name: 00015.RA4
+speed: 12000, time: 0178149, temp: 20.0, w2t: 1.62E+011
+Scan sequence 00015 saved 04/14/24 @ 21:03:50, elapsed time: 00:06:55
+
+Scan sequence 00016 started 04/14/24 @ 22:40:55, file name: 00016.RA4
+speed: 12000, time: 0184378, temp: 20.0, w2t: 1.72E+011
+Scan sequence 00016 saved 04/14/24 @ 22:46:27, elapsed time: 00:05:32
+
+Scan sequence 00017 started 04/14/24 @ 22:46:27, file name: 00017.RA4
+speed: 12000, time: 0184711, temp: 20.0, w2t: 1.73E+011
+Scan sequence 00017 saved 04/14/24 @ 22:54:00, elapsed time: 00:07:33
+
+Scan sequence 00018 started 04/14/24 @ 22:54:00, file name: 00018.RA4
+speed: 12000, time: 0185160, temp: 20.0, w2t: 1.73E+011
+Scan sequence 00018 saved 04/14/24 @ 22:59:23, elapsed time: 00:05:23
+
+Scan sequence 00019 started 04/15/24 @ 13:44:02, file name: 00019.RA4
+speed: 15000, time: 0238487, temp: 20.0, w2t: 3.04E+011
+Scan sequence 00019 saved 04/15/24 @ 13:49:04, elapsed time: 00:05:02
+
+Scan sequence 00020 started 04/15/24 @ 13:49:04, file name: 00020.RA4
+speed: 15000, time: 0238792, temp: 20.0, w2t: 3.05E+011
+Scan sequence 00020 saved 04/15/24 @ 13:55:07, elapsed time: 00:06:03
+
+Scan sequence 00021 started 04/15/24 @ 13:55:07, file name: 00021.RA4
+speed: 15000, time: 0239152, temp: 20.0, w2t: 3.05E+011
+Scan sequence 00021 saved 04/15/24 @ 14:01:01, elapsed time: 00:05:54
+
+Scan sequence 00022 started 04/15/24 @ 15:40:37, file name: 00022.RA4
+speed: 15000, time: 0245480, temp: 20.0, w2t: 3.21E+011
+Scan sequence 00022 saved 04/15/24 @ 15:47:16, elapsed time: 00:06:39
+
+Scan sequence 00023 started 04/15/24 @ 15:47:16, file name: 00023.RA4
+speed: 15000, time: 0245875, temp: 20.0, w2t: 3.22E+011
+Scan sequence 00023 saved 04/15/24 @ 15:52:52, elapsed time: 00:05:36
+
+Scan sequence 00024 started 04/15/24 @ 15:52:52, file name: 00024.RA4
+speed: 15000, time: 0246208, temp: 20.0, w2t: 3.23E+011
+Scan sequence 00024 saved 04/15/24 @ 16:00:02, elapsed time: 00:07:10
+
+Scan sequence 00025 started 04/16/24 @ 06:38:19, file name: 00025.RA4
+speed: 20000, time: 0299274, temp: 20.0, w2t: 5.53E+011
+Scan sequence 00025 saved 04/16/24 @ 06:44:21, elapsed time: 00:06:02
+
+Scan sequence 00026 started 04/16/24 @ 06:44:21, file name: 00026.RA4
+speed: 20000, time: 0299633, temp: 20.0, w2t: 5.55E+011
+Scan sequence 00026 saved 04/16/24 @ 06:50:37, elapsed time: 00:06:16
+
+Scan sequence 00027 started 04/16/24 @ 06:50:37, file name: 00027.RA4
+speed: 20000, time: 0300002, temp: 20.0, w2t: 5.56E+011
+Scan sequence 00027 saved 04/16/24 @ 06:56:36, elapsed time: 00:05:59
