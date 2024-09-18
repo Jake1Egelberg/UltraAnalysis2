@@ -1,7 +1,12 @@
 
+# Define fitting function
+.GlobalEnv$singleIdealSpecies <- function(r, w, R, temp, r0, A0, Mb, offset){
+  Ar <- offset + A0 * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) )
+  return(Ar)
+}
 
 # Read each scan
-readScans <- function(file){
+.GlobalEnv$readScans <- function(file){
   
   # Read each scan
   readAScan <- function(x,file){
@@ -45,6 +50,8 @@ readScans <- function(file){
     absorbance <- unlist(lapply(noBlanks,'[[',2))
     noise <- unlist(lapply(noBlanks,'[[',3))
     
+    R <- 8.314 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
+    
     # Create df
     dfValues <- data.frame(
       Name = NA,
@@ -54,6 +61,7 @@ readScans <- function(file){
       r = radialPosition,
       r0=NA,
       w = w,
+      R = R,
       temp = temp,
       A0 = NA,
       offset = NA,
@@ -88,6 +96,37 @@ readScans <- function(file){
   
 }
 
+# Summarize a nls as a string
+.GlobalEnv$summarizeNLS <- function(fit,type){
+  
+  # Get fit summary
+  fitSummary <- summary(fit)
+  
+  # Get coef
+  fitCoefs <- as.data.frame(coef(fitSummary))
+  
+  # Format summary string
+  parmsFit <- fitSummary$df[1]
+  coefInfoSpec <- 2
+  coefInfo <- paste(paste(rownames(fitCoefs),": ",round(fitCoefs$Estimate,coefInfoSpec)," +/- ",round(fitCoefs$`Std. Error`,coefInfoSpec),sep=""),collapse=", ")
+  itToConverge <- fitSummary$convInfo$finIter
+  convegeTolerance <- fitSummary$convInfo$finTol
+  
+  # Format summary string
+  summaryString <- paste(
+    "Fitting for: ",type," | ",itToConverge," iterations to convergence | Convergence tolerance: ",convegeTolerance,
+    " | ",parmsFit," parameters fit: ",coefInfo,sep=""
+    
+  )
+  
+  # Save coefficients and summary string
+  out <- list()
+  out$summary <- summaryString
+  out$coefs <- fitCoefs
+  return(out)
+  
+}
+
 # Read test data 
 testFiles <- list.files('www/testData/',full.names=TRUE)
 .GlobalEnv$testData <- lapply(testFiles,readScans)
@@ -107,6 +146,10 @@ sectorLabel <- "testing"
 # Define colros to use
 colorVec <- rainbow(10)
 
+# Define model types
+.GlobalEnv$modelTypes <- c("MW / Single ideal species")
+psv <- 0.71
+sd <- 1.003
 
 # Define starting vars
 defineVars <- function(){
@@ -114,8 +157,9 @@ defineVars <- function(){
   .GlobalEnv$psvValue <- NULL
   .GlobalEnv$sdValue <- NULL
   .GlobalEnv$scansToAnalyze <- 1
-  .GlobalEnv$scanData <- testData[[1]]
-  .GlobalEnv$savedSectors <- NULL
+  .GlobalEnv$scanData <- NULL #testData[[1]]
+  .GlobalEnv$savedSectors <- NULL #list(data.frame(Scan=1,Min=5.887,Max=6.046,n=68,Receptor=0,ID='r1726670506',Color='#00FFFF'))
+  .GlobalEnv$selectedModel <- modelTypes[1]
 }
 defineVars()
 
@@ -126,6 +170,24 @@ testplot <- ggplot(data.frame(x=1:10,y=1:10),aes(x=x,y=y))+
 # Define server logic required to draw a histogram
 function(input, output, session) {
 
+  # Update the log text
+  updateLog <- function(update){
+    
+    logText <- c(update,logText)
+    .GlobalEnv$logText <- logText
+    
+    output$log <- renderUI({
+      source('www/log.R')[[1]]
+    })
+    
+  }
+  
+  # Reset variables on refresh
+  observe({
+    defineVars()
+    updateLog('UltraAnalysis loaded')
+  })
+  
   output$upload <- renderUI({
     source('www/upload.R')[[1]]
   })  
@@ -143,20 +205,11 @@ function(input, output, session) {
     })
   }
   renderProcess()
-  
-  # Update the log text
-  updateLog <- function(update){
-    
-    logText <- c(update,logText)
-    .GlobalEnv$logText <- logText
-    
-    output$log <- renderUI({
-      source('www/log.R')[[1]]
-    })
-    
-  }
-  updateLog('UltraAnalysis loaded')
 
+  
+  # ------------ UPLOAD
+  
+  
   # When user uploads data
   observeEvent(input$uploadInput,{
     
@@ -277,6 +330,7 @@ function(input, output, session) {
         
               if(value){
                 scansToAnalyze <- c(nextScanNumber,scansToAnalyze)
+                scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
               } else{
                 scansToAnalyze <- scansToAnalyze[-which(scansToAnalyze==nextScanNumber)]
               }
@@ -334,9 +388,43 @@ function(input, output, session) {
   })
   
   # Function to render scan plot
-  renderScanPlot <- function(){
+  output$sectorPlotFrame <- NULL
+  renderScanPlot <- function(selectedSector=NULL,sectorLabel=NULL,bothPlots=NULL){
     
-    currentScanPlot <- ggplot(currentScanData,aes(x=r,y=Ar))+
+    if(length(currentScanData)==0){
+      return()
+    }
+    
+    if(!is.null(selectedSector)){
+      
+      scanDataToPlot <- subset(currentScanData,r>(as.numeric(selectedSector$xmin)*0.99)&r<(as.numeric(selectedSector$xmax)*1.01))
+    
+      # Render output
+      output$sectorPlotFrame <- renderUI(
+        
+        div(
+          class='column',
+          p(sectorLabel),
+          renderPlot(
+            bothPlots,
+            width=350,
+            height=180
+          ),
+          div(style='margin:10px auto;',
+              textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
+          ),
+          div(style='margin:-10px auto;',
+              actionButton('saveSector',label="💾 Save sector")
+          )
+        )
+        
+      )
+      
+    } else{
+      scanDataToPlot <- currentScanData
+    }
+ 
+    currentScanPlot <- ggplot(scanDataToPlot,aes(x=r,y=Ar))+
       geom_point()+
       theme_prism()
     
@@ -350,18 +438,27 @@ function(input, output, session) {
       dataInRange <- lapply(1:nrow(inScan),function(x){
         
         row <- inScan[x,]
-        sub <- subset(currentScanData,r>row$Min&r<row$Max)
+   
+        sub <- subset(scanDataToPlot,r>=row$Min&r<=row$Max)
+        
+        if(nrow(sub)==0){
+          return(NULL)
+        }
+        
         sub$Color <- row$Color
         return(sub)
+      
+      
         
       }) %>% bind_rows()
-      
-      currentScanPlot <- currentScanPlot + 
-        geom_point(data=dataInRange,aes(x=r,y=Ar,col=Color))+
-        scale_color_identity()
+  
+      if(nrow(dataInRange)>0){
+        currentScanPlot <- currentScanPlot + 
+          geom_point(data=dataInRange,aes(x=r,y=Ar,col=Color))+
+          scale_color_identity()
+      }
       
     }
-    
     
     #Render output
     output$currentScanPlotOutput <- renderPlot(
@@ -369,6 +466,10 @@ function(input, output, session) {
     )
     
   }
+  
+  
+  # ------------ PROCESS
+  
   
   # When user selects a scan to see up close
   observeEvent(input$selectScan,{
@@ -388,20 +489,35 @@ function(input, output, session) {
   # When user selects a brush
   observeEvent(input$selectingSector,{
     
-    .GlobalEnv$selectedSector <- input$selectingSector
-    
+    selectedSector <- input$selectingSector
+
     # Get sector data from scan data
     sectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
     
     # Get linear fit
-    linearFit <- lm(Ar~r,data=sectorData)
-    linearFitSummary <- summary(linearFit)
-    rsqr <- linearFitSummary$r.squared
-    coefs <- coef(linearFitSummary)
+    linearFit <- tryCatch(lm(Ar~r,data=sectorData),error=function(e)return(NA))
+    linearFitSummary <- tryCatch(summary(linearFit),error=function(e)return(NA))
+    rsqr <- tryCatch(linearFitSummary$r.squared,error=function(e)return(NA))
+    coefs <- tryCatch(coef(linearFitSummary),error=function(e)return(c(0,0)))
     
     # Predict from fit
-    preds <- predict(linearFit,sectorData)
+    preds <- tryCatch(predict(linearFit,sectorData),error=function(e)return(NA))
     sectorData$pAr <- preds
+    
+    tmpData <- data.frame(
+      Scan = selectedScan,
+      Min = min(sectorData$r),
+      Max = max(sectorData$r),
+      n = nrow(sectorData)
+    )
+    
+    # Prevents rendering of plots and ui if selected range is the same as what is already displayed
+    checkForSector <- tryCatch(print(currentSectorDf),error=function(e)return(NA))
+    if(length(checkForSector)>1){
+      if(identical(tmpData,currentSectorDf)){
+        return()
+      }
+    }
     
     # Format current sector dataframe
     .GlobalEnv$currentSectorDf <- data.frame(
@@ -419,54 +535,47 @@ function(input, output, session) {
     
     # Plot
     currentSectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
-      geom_point()+
+      geom_point(size=1)+
       geom_abline(slope=coefs[2],intercept=coefs[1],col='red')+
+      scale_y_continuous(n.breaks=3)+
       theme_prism()+
       theme(
         axis.text.x = element_blank(),
         axis.title.x = element_blank(),
         axis.line.x = element_blank(),
-        axis.ticks.x = element_blank()
+        axis.ticks.x = element_blank(),
+        axis.text = element_text(size=10),
+        axis.title = element_text(size=11)
       )
     
     # Plot residuals
     residualPlot <- ggplot(sectorData,aes(x=r,y=Ar-pAr))+
-      geom_point()+
+      geom_point(size=1)+
       geom_hline(yintercept=0,col='gray20')+
       scale_y_continuous(n.breaks=3)+
       ylab("Ar - pAr")+
-      theme_prism()
+      theme_prism()+
+      theme(axis.text = element_text(size=10),
+            axis.title = element_text(size=11)
+            )
     
     # combine plots
     bothPlots <- plot_grid(currentSectorPlot,residualPlot,
                            rel_heights=c(1,1),ncol=1,align='v')
     
-    # Render output
-    output$sectorPlotFrame <- renderUI(
-      
-      div(
-        class='column',
-        p(sectorLabel),
-        renderPlot(
-          bothPlots,
-          width=350,
-          height=180
-        ),
-        div(style='margin:10px auto;',
-            textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
-        ),
-        div(style='margin:-10px auto;',
-            actionButton('saveSector',label="💾 Save sector")
-        )
-      )
-      
-    )
+    # Update scan plot to zoom
+    renderScanPlot(selectedSector,sectorLabel,bothPlots)
     
+  })
+  
+  # When a user clicks the plot, reset to normal view
+  observeEvent(input$resetPlotView,{
+    renderScanPlot()
   })
 
   # Function to render saved selections
   renderSavedSelections <- function(){
-    print(savedSectors)
+
     if(length(savedSectors)==0){
       output$savedSectorUI <- NULL
       return()
@@ -480,11 +589,12 @@ function(input, output, session) {
           
           tmpSector <- savedSectors[[x]]
           sectorID <- tmpSector$ID
+          colorString <- paste(as.numeric(col2rgb(tmpSector$Color)[,1]),collapse=',')
           
           div(
-            class='row',style='margin:5px;width:100%;',
+            class='row',style=paste('margin:5px;width:100%;border-radius:10px;background-color:rgba(',colorString,',0.2)',sep=""),
             div(
-              class='column',style='align-items:center;width:15%',
+              class='column',style='align-items:center;width:10%;margin-left:5%',
               p(HTML("<b>Scan</b>"),style='font-size:12px;'),
               p(tmpSector$Scan,style='font-size:10px;')
             ),
@@ -496,10 +606,10 @@ function(input, output, session) {
             div(
               class='column',style='align-items:center;width:15%',
               p(HTML("<b>uM</b>"),style='font-size:12px;'),
-              p(ifelse(tmpSector$Receptor=="",0,tmpSector$Receptor),style='font-size:10px;')
+              p(tmpSector$Receptor,style='font-size:10px;')
             ),
             div(class='column',style='align-items:center;width:15%;justify-content:center;margin-left:10px',
-              actionButton(sectorID,label="🗑️",style=paste('font-size:12px;opacity:0.5;background-color:',tmpSector$Color,sep=""))
+              actionButton(sectorID,label="🗑️",style='font-size:12px;background-color:transparent;border: 0px solid black')
             )
           ) # End row
         })
@@ -512,7 +622,14 @@ function(input, output, session) {
   # Define function to edit a secotr
   editSelectedSector <- function(receptorID){
     ids <- lapply(savedSectors,'[[',6) %>% unlist()
-    savedSectors <- savedSectors[-which(ids==receptorID)]
+    idToRemove <- which(ids==receptorID)
+    
+    sectorToRemove <- savedSectors[[idToRemove]]
+    # Update log
+    removeSectorLog <- paste("Removed sector: Scan ",sectorToRemove$Scan," Min ",sectorToRemove$Min,' Max ',sectorToRemove$Max, " n = ",sectorToRemove$n,sep="")
+    updateLog(removeSectorLog)
+    
+    savedSectors <- savedSectors[-idToRemove]
     .GlobalEnv$savedSectors <- savedSectors
     
     #Update UI
@@ -525,37 +642,267 @@ function(input, output, session) {
     
     
     # Get receptor concentration
-    receptorConcentration <- input$receptorInput
+    receptorConcentration <- ifelse(input$receptorInput=="",0,input$receptorInput)
     currentSectorDf$Receptor <- receptorConcentration
     
     # Define sector ID
     sectorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
-    currentSectorDf$ID <- sectorID
     
-    # Define sector color
-    currentSectorDf$Color <- sample(colorVec,1)
+    # Check if sector ID already exists
+    otherIDs <- unlist(lapply(savedSectors,'[[',6))
     
-    newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
-    updateLog(newSectorLog)
+    if(!(sectorID%in%otherIDs)){
+      currentSectorDf$ID <- sectorID
+      
+      # Define sector color
+      currentSectorDf$Color <- sample(colorVec,1)
+      
+      newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
+      updateLog(newSectorLog)
+      
+      # Save as list
+      savedSectors[[length(savedSectors)+1]] <- currentSectorDf
+      .GlobalEnv$savedSectors <- savedSectors
     
-    # Save as list
-    savedSectors[[length(savedSectors)+1]] <- currentSectorDf
-    .GlobalEnv$savedSectors <- savedSectors
+      # Create hook for editing 
+      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+        editSelectedSector(sectorID)
+      })
   
-    # Create hook for editing 
-    observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
-      editSelectedSector(sectorID)
-    })
-
-    # Update UI
-    renderSavedSelections()
-    
-    # Update plot
-    renderScanPlot()
+      # Update UI
+      renderSavedSelections()
+      
+      # Update plot
+      session$resetBrush('selectingSector')
+      renderScanPlot()
+    }
     
     
   })
   
+  
+  # ------------ FIT
+  
+  # When user selects a model type
+  observeEvent(input$modelType,{
+  
+    # Render UI for model parms
+    .GlobalEnv$selectedModel <- input$modelType
+    
+  
+    output$modelParms <- renderUI({
+      
+      if(selectedModel=='MW / Single ideal species'){
+        
+        div(class='column',
+          actionButton('fitData','🏃 Run fit',style='align-self:center')
+        )
+      }
 
+    })
+    
+  })
+  
+  
+  # When user tries to fit the data
+  observeEvent(input$fitData,{
+    
+    # Get psv and sd inputs
+
+    # Format check vector
+    checkVec <- c(input$psvInput,input$sdInput)
+    if(length(checkVec)==0){
+      updateLog("Invalid partial specific volume (PSV) input. Defaulting to 0.71 mL/g")
+      psv <- 0.71
+      updateLog("Invalid solvent density (SD). Defaulting to 1.003 g/mL")
+      sd <- 1.003
+    } else{
+      
+      if(input$psvInput==""){
+        updateLog("Invalid partial specific volume (PSV). Defaulting to 0.71 mL/g")
+        psv <- 0.71
+      } else{
+        psv <- input$psvInput
+      }
+      
+      if(input$sdInput==""){
+        updateLog("Invalid solvent density (SD) input. Defaulting to 1.003 g/mL")
+        sd <- 1.003
+      } else{
+        sd <- input$sdInput
+      }
+    }
+    
+   
+    
+    # Loop through saved sectors
+    if(length(savedSectors)==0){
+      updateLog("No sectors to fit. Save sectors to fit a model.")
+      return()
+    }
+    
+    # Fit baselines
+    baselineFits <- lapply(1:length(savedSectors),function(x){
+      
+      # Get sector
+      sector <- savedSectors[[x]]
+      
+      # Get data from scan
+      sectorScan <- scanData[[as.numeric(sector$Scan)]]
+      
+      # Subset out sector
+      data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
+      
+      # Define r0 reference radius
+      r0 <- median(data$r)
+      data$r0 <- r0
+      
+      # Fit baseline and reference absorbance
+      baselineFit <- gsl_nls(
+        Ar~singleIdealSpecies(r,w,R,temp,r0,A0, Mb, offset),
+        data=data,
+        algorithm='lm',
+        start=c(A0=1,offset=1,Mb=1),
+        lower=c(A0=0,offset=NULL,Mb=0)
+      )
+      
+      # Get fit info
+      fitSummary <- summarizeNLS(baselineFit,"baseline")
+      
+      # Update log
+      tryCatch(updateLog(fitSummary$summary),error=function(e)return())
+      
+      # Get coefficients
+      coefs <- fitSummary$coefs
+      
+      # Extract A0 and offset
+      A0 <- coefs$Estimate[which(rownames(coefs)=="A0")]
+      A0Err <- coefs$`Std. Error`[which(rownames(coefs)=="A0")]
+      offset <- coefs$Estimate[which(rownames(coefs)=="offset")]
+      offsetErr <- coefs$`Std. Error`[which(rownames(coefs)=="offset")]
+      
+      # Add to data
+      data$A0 <- A0
+      data$A0Err <- A0Err
+      data$offset <- offset
+      data$OffsetErr <- offsetErr
+      data$ID <- paste("GROUP",x,sep="")
+      
+      # Return data
+      return(data)
+      
+      
+    }) %>% bind_rows()
+    
+    if(selectedModel=='MW / Single ideal species'){
+      
+      # Fit for MW
+      mwFit <-  gsl_nls(
+        Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
+        data=baselineFits,
+        algorithm='lm',
+        start=c(Mb=1)
+      )
+      
+      # Extract fitted Mb
+      mwFitSummary <- summarizeNLS(mwFit,selectedModel)
+      
+      # Update log
+      tryCatch(updateLog(mwFitSummary$summary),error=function(e){return()})
+      
+      # Get coef
+      Mb <- mwFitSummary$coefs[which(rownames(mwFitSummary$coefs)=="Mb"),]
+      
+      # Convert Mb to MW
+      mw <- (Mb$Estimate/(1-(psv*sd)))/1000
+      mwErr <- (Mb$`Std. Error`/(1-(psv*sd)))/1000
+      
+      # predict
+      preds <- predict(mwFit,baselineFits)
+      baselineFits$pAr <- preds
+      
+      # Calculate rsqr
+      meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
+      pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
+      rsqr <- 1-(pErr/meanErr)
+      
+      # Plot non linear fit
+      nonlinear <- ggplot(baselineFits,aes(x=r))+
+        geom_point(aes(y=Ar-offset))+
+        geom_line(aes(y=pAr-offset,group=ID),col='red')+
+        theme_prism()
+      
+      # Plot linear
+      linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
+        geom_point(aes(y=log((Ar-offset)/A0)))+
+        geom_line(aes(y=log((pAr-offset)/A0)),col='red')+
+        xlab("(r^2 - r0^2) / 2")+
+        ylab("ln( (Ar - offset) / A0 )")+
+        theme_prism()
+      
+      # Format plot title
+      plotTitle <- paste("MW = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",
+                         "\n Buoyant MW = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa, R^2 = ",round(rsqr,3),sep="")
+      
+      # Format grid
+      plotgrid <- plot_grid(
+        nonlinear,
+        linear,
+        ncol=2,
+        nrow=1,
+        align='h'
+      )
+   
+      
+    }
+    
+    # Render ui
+    output$fitResult <- renderUI({
+      
+      #Define download handler
+      output$downloadFit<-downloadHandler(
+        
+        filename=function(){
+          paste("ULTRAANALYSIS_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".csv",sep="")
+        },
+        content=function(file){
+          write.csv(baselineFits,file=file,row.names=FALSE)
+        }
+        
+      )#download handler
+      
+    
+      div(
+        class='row',
+        div(
+          class='column',style='width:fit-contents;margin-left:15px;',
+          renderPlot(plotgrid,width=750,height=300)
+        ),
+        div(
+          class='column',style='width:fit-contents;margin-left:30px',
+          div(class='row',
+            div(
+              class='column',
+              p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
+              p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
+              p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
+            )
+          ),
+          div(
+            class='row',style='align-self:center;margin-top;10px',
+            downloadButton("downloadFit","Download")
+          )
+        )
+      )
+      
+      
+    })
+    
+    
+    
+    
+  })
+  
+  
 
 }
