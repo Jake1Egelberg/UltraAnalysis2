@@ -218,9 +218,9 @@ function(input, output, session) {
   output$fit <- renderUI({
     source('www/fit.R')[[1]]
   })  
-  renderModelTypeSelection<-function(){
+  renderModelTypeSelection<-function(model){
     output$modelTypeSelection <- renderUI({
-      selectInput('modelType',NULL,choices=modelTypes,selected=dataList$selectedModel,multiple=FALSE,width=300)
+      selectInput('modelType',NULL,choices=modelTypes,selected=model,multiple=FALSE,width=300)
     })
   }
 
@@ -431,7 +431,7 @@ function(input, output, session) {
         renderSavedSelections()
         renderScanPlot()
         renderScanSelection()
-        renderModelTypeSelection()
+        renderModelTypeSelection(dataList$modelType)
         
       }
       
@@ -443,6 +443,7 @@ function(input, output, session) {
       # Update the datalist with scan data
       updateDataList('scanData',scanData)
       defaultScansToAnalyze <- NULL
+      renderModelTypeSelection(modelTypes[1])
     }
     
     if(stop==''){
