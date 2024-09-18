@@ -96,6 +96,18 @@
   
 }
 
+# function to get random character
+.GlobalEnv$getRandomCharacter <- function(){
+  id <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+  return(id)
+}
+
+# Function to get random color
+.GlobalEnv$getRandomColor <- function(){
+  col <- sample(colorVec,1)
+  return(col)
+}
+
 # Summarize a nls as a string
 .GlobalEnv$summarizeNLS <- function(fit,type){
   
@@ -206,6 +218,128 @@ function(input, output, session) {
     output$log <- renderUI({
       source('www/log.R')[[1]]
     })
+    
+  }
+  
+  # Automatically find the meniscus
+  findMenisci <- function(tmp){
+    
+    sectorNum <- 3
+    
+    # Get scan number
+    scanNumber <- unique(tmp$Scan)
+    
+    updateLog(paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep=""))
+    progress$set(message=paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep=""),
+                 value=(scanNumber-1)/length(dataList$scansToAnalyze))
+    
+    # Get derivative for clustering
+    tmp$Dr <- c(0,diff(tmp$Ar))
+    
+    # Get mean derivative
+    meanDr <- mean(tmp$Dr)
+    tmp$meanDr <- meanDr
+    
+    # Cluster into 3 groups by x,y position
+    clustVec <- sqrt(tmp$Dr^2+tmp$r^2)
+    set.seed(123)
+    kclust <- kmeans(clustVec,sectorNum)
+    clusterVector <- kclust$cluster
+    
+    # ORder cluster vector from small to large to keep conssitent
+    clusterVectorOrdered <- clusterVector[order(clusterVector)]
+    
+    tmp$Sector <- clusterVectorOrdered
+    
+    # Plot clusters
+    clusterPlot <- ggplot(tmp,aes(x=r,y=Ar))+
+      #geom_line()+
+      geom_point(data=tmp,aes(y=Dr,col=as.character(Sector)))+
+      geom_hline(yintercept=meanDr,col='red')+
+      theme_prism()
+    
+    # Get sectors
+    autoRanges <- lapply(1:sectorNum,function(sector){
+      
+      sectorData <- subset(tmp,Sector==sector)
+      
+      # Calculate residuals to mean
+      residualsToMean <- abs(sectorData$Dr-mean(sectorData$meanDr))
+      sectorData$residuals <- residualsToMean
+      
+      # Identify regions of consistency among residuals vector
+      splitList <- vector('list',length(residualsToMean))
+      for(y in 2:(length(residualsToMean)-2)){
+        
+        # Get groups
+        group1 <- residualsToMean[1:(y-1)]
+        group2 <- residualsToMean[y:length(residualsToMean)]
+        
+        # Label vector
+        sdList <- lapply(10:length(group2),function(z){
+          # Get other groups
+          group3 <- group2[1:(z-1)]
+          group4 <- group2[z:length(group2)]
+          
+          # Get sd of group 3 (this is what we want to minimize)
+          group3SD <- sd(group3)/length(group3)
+          return(group3SD)
+        }) %>% unlist()
+        
+        # Get best split
+        bestSplitIndex <- which(sdList==min(sdList,na.rm=TRUE))
+        bestSplitValue <- group2[bestSplitIndex]
+        trueIndex <- which(residualsToMean==bestSplitValue)
+        
+        splitList[[y]]$split1 <- y
+        splitList[[y]]$split2 <- trueIndex
+        splitList[[y]]$error <- sdList[bestSplitIndex]
+      }
+      
+      # Curate
+      splitCur <- splitList[!unlist(lapply(splitList,is.null))]
+      
+      # Get best split
+      splitErrs <- lapply(splitCur,'[[',3) %>% unlist()
+      bestSplit <- splitCur[which(splitErrs==min(splitErrs))][[1]]
+      
+      # Get splits in terms of radius
+      split1data <- sectorData[max(bestSplit$split1),]
+      split1 <- split1data$r
+      split2 <- sectorData[max(bestSplit$split2),]$r
+      
+      # plot
+      sectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
+        geom_point()+
+        geom_vline(xintercept=split1,col='blue')+
+        geom_vline(xintercept=split2,col='blue')+
+        ylab("Ar")+
+        xlab("r")+
+        theme_prism()
+      
+      # Subset out data for identified miniscus
+      miniscusData <- subset(sectorData,r>split1&r<split2)
+      
+      # Format as range
+      rangeFormat <- data.frame(
+        Scan=scanNumber,
+        Min=min(miniscusData$r),
+        Max=max(miniscusData$r),
+        n=nrow(miniscusData),
+        Receptor=0,
+        ID=getRandomCharacter(),
+        Color=getRandomColor()
+      )
+      
+      return(rangeFormat)
+      
+      
+    }) %>% bind_rows()
+    
+    updateLog(paste("Sector finding complete for scan ",scanNumber,sep=""))
+    
+    # Return ranges
+    return(autoRanges)
     
   }
   
@@ -686,7 +820,7 @@ function(input, output, session) {
     currentSectorDf$Receptor <- receptorConcentration
     
     # Define sector ID
-    sectorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+    sectorID <- getRandomCharacter()
     
     # Get saved sectors
     savedSectors <- dataList$savedSectors
@@ -698,7 +832,7 @@ function(input, output, session) {
       currentSectorDf$ID <- sectorID
       
       # Define sector color
-      currentSectorDf$Color <- sample(colorVec,1)
+      currentSectorDf$Color <- getRandomColor()
       
       newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
       tryCatch(updateLog(newSectorLog),error=function(e)return())
@@ -791,6 +925,45 @@ function(input, output, session) {
     renderScanPlot()
   }
   
+  # For auto sector finding
+  observeEvent(input$autoSector,{
+    
+    if(length(dataList$scansToAnalyze)==0){
+      return()
+    }
+    
+    # Create progress bar
+    .GlobalEnv$progress <- shiny::Progress$new()
+    progress$set(message='Loading data...',value=0)
+    
+    # For each scan, run find miniscus
+    allScanData <- dataList$scanData[dataList$scansToAnalyze]
+   
+    # Find menisci
+    identifiedSectors <- lapply(allScanData,findMenisci) %>% bind_rows()
+    
+    # Covnert each row to a list
+    identifiedSectorsList <- lapply(1:nrow(identifiedSectors),function(x){return(identifiedSectors[x,])})
+    
+    # Update saved ranges
+    # Save as list
+    savedSectors <- dataList$savedSectors
+    newSavedSectors <- c(savedSectors,identifiedSectorsList)
+    
+    # Update dataList
+    updateDataList('savedSectors',newSavedSectors)
+    
+    # Update UI
+    renderSavedSelections()
+    
+    # Update plot
+    session$resetBrush('selectingSector')
+    renderScanPlot()
+    
+    progress$close()
+    
+  })
+  
   # ------------ FIT
   
   # When user selects a model type
@@ -852,6 +1025,7 @@ function(input, output, session) {
     savedSectors <- dataList$savedSectors 
     
     # Loop through saved sectors
+    print(length(savedSectors))
     if(length(savedSectors)==0){
       updateLog("No sectors to fit. Save sectors to fit a model.")
       return()
@@ -909,6 +1083,13 @@ function(input, output, session) {
       
       
     }) %>% bind_rows()
+    
+    print(dataList$selectedModel)
+    
+    if(length(dataList$selectedModel)==0){
+      selectedModel <- input$modelType
+      updateDataList('selectedModel',selectedModel)
+    }
     
     if(dataList$selectedModel=='MW / Single ideal species'){
       
@@ -1032,9 +1213,6 @@ function(input, output, session) {
       
       
     })
-    
-    
-    
     
   })
   
