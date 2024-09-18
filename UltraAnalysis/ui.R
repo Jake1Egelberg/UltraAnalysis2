@@ -1,11 +1,17 @@
 
+# Save inputs + log for reloading experiments
+# Automatic range finding
+
+
 library(shiny)
 library(stringr)
 library(ggplot2)
 library(ggprism)
 library(dplyr)
 library(magick)
+library(gplots)
 library(cowplot)
+library(gslnls)
 
 # Define UI for application that draws a histogram
 fluidPage(
@@ -40,7 +46,7 @@ fluidPage(
         uiOutput('fit')
       )
     ),
-    selected='process'
+    selected='upload'
   ),
   uiOutput('log')
 )

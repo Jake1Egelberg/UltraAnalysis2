@@ -3,15 +3,17 @@ div(
   class='row',style='height:65vh;',
   div(
     class='column',style='width:19%;height:100%;padding:10px;',
-    p('WIP',class='header'),
-    
+    p('Model to fit',class='header'),
+    selectInput('modelType',NULL,choices=modelTypes,selected=selectedModel,multiple=FALSE,width=300),
+    uiOutput('modelParms')
   ), # Column 1
   div(
     class='column',style='width:1%;height:90%;border-left: 1.5px solid #002060;margin-left:1%;align-self:center',
   ), # divider column
   div(
-    class='column',style='width:fit-content;height:100%;padding:10px;',
-    p('WIP',class='header'),
+    class='column',style='padding:10px;',
+    p(paste("Global fit for: ",selectedModel,sep=""),class='header'),
+    uiOutput('fitResult')
   ), #column 2
   
   
