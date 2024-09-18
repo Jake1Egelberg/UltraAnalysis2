@@ -144,7 +144,7 @@ bothPlots <- ggplot(testData[[1]][[1]],aes(x=r,y=Ar))+
 sectorLabel <- "testing"
 
 # Define colros to use
-colorVec <- rainbow(10)
+.GlobalEnv$colorVec <- rainbow(10)
 
 # Define model types
 .GlobalEnv$modelTypes <- c("MW / Single ideal species")
@@ -153,28 +153,55 @@ sd <- 1.003
 
 # Define starting vars
 defineVars <- function(){
-  .GlobalEnv$logText <- NULL
-  .GlobalEnv$psvValue <- NULL
-  .GlobalEnv$sdValue <- NULL
-  .GlobalEnv$scansToAnalyze <- 1
-  .GlobalEnv$scanData <- NULL #testData[[1]]
-  .GlobalEnv$savedSectors <- NULL #list(data.frame(Scan=1,Min=5.887,Max=6.046,n=68,Receptor=0,ID='r1726670506',Color='#00FFFF'))
-  .GlobalEnv$selectedModel <- modelTypes[1]
+  #.GlobalEnv$logText <- NULL
+  #.GlobalEnv$scanData <- NULL #testData[[1]]
+  #.GlobalEnv$savedSectors <- NULL #list(data.frame(Scan=1,Min=5.887,Max=6.046,n=68,Receptor=0,ID='r1726670506',Color='#00FFFF'))
+  #.GlobalEnv$selectedModel <- modelTypes[1]
+  
+  # Define data list
+    # selectedModel - Type of model to fit
+    # logText - text of log
+    # scanData - all loaded scans
+    # scansToAnalyze - scans selected for inclusion in analysis
+    # selectedScan - scan selected for preview
+    # selectedSector - currently brushed sector on the plot
+    # savedSectors - sectors saved by the user for fitting
+    # psvValue - partial specific volume
+    # sdValue - solvent density
+  dataList <- list()
+  # dataList$selectedModel <- modelTypes[1]
+  # dataList$selectedScan <- 1
+  # dataList$savedSectors <- list(data.frame(Scan=1,Min=5.887,Max=6.046,n=68,Receptor=0,ID='r1726670506',Color='#00FFFF'))
+  # dataList$scanData <- testData[[1]]
+  # dataList$scansToAnalyze <- 1
+  .GlobalEnv$dataList <- dataList
+  
 }
 defineVars()
 
 testplot <- ggplot(data.frame(x=1:10,y=1:10),aes(x=x,y=y))+
   geom_point()
 
+# function to update data list
+.GlobalEnv$updateDataList <- function(dataType,newValue){
+  
+  dataList[[dataType]] <- newValue
+  .GlobalEnv$dataList <- dataList
+  
+  
+}
+
 
 # Define server logic required to draw a histogram
 function(input, output, session) {
 
+  # ------------ STARTUP
+
   # Update the log text
   updateLog <- function(update){
     
-    logText <- c(update,logText)
-    .GlobalEnv$logText <- logText
+    logText <- c(update,dataList$logText)
+    updateDataList('logText',logText)
     
     output$log <- renderUI({
       source('www/log.R')[[1]]
@@ -182,61 +209,134 @@ function(input, output, session) {
     
   }
   
-  # Reset variables on refresh
-  observe({
-    defineVars()
-    updateLog('UltraAnalysis loaded')
-  })
-  
+  # Load upload tab
   output$upload <- renderUI({
     source('www/upload.R')[[1]]
   })  
   
+  # Load fit tab
   output$fit <- renderUI({
     source('www/fit.R')[[1]]
   })  
-  
-  #Render output
-  output$currentScanPlotOutput <- NULL
-  
-  renderProcess <- function(){
-    output$process <- renderUI({
-      source('www/process.R')[[1]]
+  renderModelTypeSelection<-function(){
+    output$modelTypeSelection <- renderUI({
+      selectInput('modelType',NULL,choices=modelTypes,selected=dataList$selectedModel,multiple=FALSE,width=300)
     })
   }
-  renderProcess()
 
+  # Render process tab
+  output$process <- renderUI({
+    source('www/process.R')[[1]]
+  })
+  renderScanSelection <- function(){
+    
+    output$scanSelectionInput <- renderUI({
+      selectInput('selectScan',NULL,choices=dataList$scansToAnalyze,selected=dataList$scansToAnalyze[1],multiple=FALSE,width=300)
+    })
+    
+  }
+  
+  # Reset the ui
+  resetUI <- function(){
+    
+    # Process
+    output$savedSectorUI <- NULL
+    output$sectorPlotFrame <- NULL
+    output$currentScanPlotOutput <- NULL
+    
+    # Fit
+    output$fitResult <- NULL
+    
+    
+  }
+  
+  # Reset variables on refresh
+  observe({
+    defineVars()
+    resetUI()
+    updateLog('UltraAnalysis loaded')
+  })
   
   # ------------ UPLOAD
   
+  # Render preview of scan data within scanPlotPreviews
+  generateScanPlotPreview <- function(currentScan,scanDataInd,defaultScansToAnalyze){
+    
+    scanPlot <- ggplot(currentScan,aes(x=r,y=Ar))+
+      geom_line()+
+      xlab("r (cm)")+
+      theme_prism()
+    
+    scanNumber <- unique(currentScan$Scan)
+    scanSpeed <- unique(currentScan$Speed)
+    scanInput1 <- paste("scan",scanDataInd,sep="")
+    
+    # Get value
+    if(length(defaultScansToAnalyze)==0){
+      checkValue <- 0
+    } else{
+      if(scanNumber%in%defaultScansToAnalyze){
+        checkValue <- 1
+      } else{
+        checkValue <- 0
+      } 
+    }
+    
+    # Create observe event when someone selects a scan to include
+    observeEvent(eval(parse(text=paste('input$scan',scanDataInd,sep=""))),{
+      # Retrieve value and scan
+      value <- eval(parse(text=paste('input$scan',scanDataInd,sep="")))
+      
+     
+      if(value){
+       
+        if(!(scanNumber%in%dataList$scansToAnalyze)){
+          scansToAnalyze <- c(scanNumber,dataList$scansToAnalyze)
+          scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
+        } else{
+          scansToAnalyze <- dataList$scansToAnalyze
+        }
+    
+      } else{
+        if(scanNumber%in%dataList$scansToAnalyze){
+          scansToAnalyze <- dataList$scansToAnalyze[-which(dataList$scansToAnalyze==scanNumber)] 
+        } else{
+          scansToAnalyze <- dataList$scansToAnalyze
+        }
+      }
+    
+      updateDataList('scansToAnalyze',scansToAnalyze)
+      
+      # Update process tab
+      renderScanSelection()
+      
+    })
+    
+    firstPlot <- div(
+      class='column',style='width:fit-content;',
+      div(class='row',style='margin:10px;',
+          div(
+            class='column',style='width:fit-content;',
+            renderPlot(scanPlot,width=300,height=200)
+          ),
+          div(
+            class='column',style='width:100px;align-items:flex-start;margin-left:10px;',
+            p(HTML(paste("<b>Scan ",scanNumber,"</b>",sep="")),class='body'),
+            p(HTML(paste(scanSpeed," rpm",sep="")),class='body'),
+            checkboxInput(scanInput1,"Include",checkValue,width=300)
+          )
+      )
+    )
+    return(firstPlot)
+    
+  }
   
-  # When user uploads data
-  observeEvent(input$uploadInput,{
+  # Render scan plot previews
+  renderScanPlots <- function(defaultScansToAnalyze=NULL){
     
-    # Reset vars
-    defineVars()
-    updateLog('UltraAnalysis loaded')
-    
-    # Get uploaded file
-    .GlobalEnv$uploadInput <- input$uploadInput
-    
-    file <- uploadInput$datapath
-    
-    # Update log
-    updateLog(paste("Uploaded ",length(file)," files",sep=""))
-    
-    # Create progress bar
-    progress <- shiny::Progress$new()
-    progress$set(message='Loading uploaded file...',value=0.1)
-
-    # Read each scan
-    progress$set(message='Reading scan data...',value=0.5)
-    .GlobalEnv$scanData <- readScans(file)
-    
-    # Format scan plot output
     output$dataPreview <- renderUI({
       
-      dataLength <- length(scanData)
+      dataLength <- length(dataList$scanData)
       lengthVec <- 1:dataLength
       
       # Get row indices
@@ -251,145 +351,146 @@ function(input, output, session) {
       div(
         lapply(1:length(uniqueRows), function(i) { #generate row for each plot
           
+          # Get current row plotting to
           currentRow <- uniqueRows[i]
           
           # Get scanData indices
           scanDataInds <- which(rowVec==currentRow)
           
-          currentScan <- scanData[[scanDataInds[1]]]
-          scanPlot <- ggplot(currentScan,aes(x=r,y=Ar))+
-            geom_line()+
-            xlab("r (cm)")+
-            theme_prism()
-          
-          scanNumber <- unique(currentScan$Scan)
-          scanSpeed <- unique(currentScan$Speed)
-          scanInput1 <- paste("scan",scanDataInds[1],sep="")
-          
-          # Create observe event when someone selects a scan to include
-          observeEvent(eval(parse(text=paste('input$scan',scanDataInds[1],sep=""))),{
-            # Retrieve value and scan
-            value <- eval(parse(text=paste('input$scan',scanDataInds[1],sep="")))
-            
-            if(value){
-              scansToAnalyze <- c(scanNumber,scansToAnalyze)
-              scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
-            } else{
-              scansToAnalyze <- scansToAnalyze[-which(scansToAnalyze==scanNumber)]
-            }
-
-            .GlobalEnv$scansToAnalyze <- scansToAnalyze
-            
-            if(length(scansToAnalyze)>0){
-              updateLog(paste("Scans included: ",paste(scansToAnalyze,collapse=", "),sep=""))
-            } else{
-              if(!is.null(scansToAnalyze)){
-                updateLog("No scans included")
-              }
-            }
-            
-            # Update process tab
-            renderProcess()
-            
-          })
-          
-          firstPlot <- div(
-            class='column',style='width:fit-content;',
-            div(class='row',style='margin:10px;',
-                div(
-                  class='column',style='width:fit-content;',
-                  renderPlot(scanPlot,width=300,height=200)
-                ),
-                div(
-                  class='column',style='width:100px;align-items:flex-start;margin-left:10px;',
-                  p(HTML(paste("<b>Scan ",scanNumber,"</b>",sep="")),class='body'),
-                  p(HTML(paste(scanSpeed," rpm",sep="")),class='body'),
-                  checkboxInput(scanInput1,"Include",0,width=300)
-                )
-            )
-          )
-          
-          
+          # Generate first scan plot
+          currentScan <- dataList$scanData[[scanDataInds[1]]]
+          firstPlot <- generateScanPlotPreview(currentScan,scanDataInd=scanDataInds[1],defaultScansToAnalyze)
           
           if(length(scanDataInds)>1){
             
-            nextScan <- scanData[[scanDataInds[2]]]
-            scanPlot2 <- ggplot(nextScan,aes(x=r,y=Ar))+
-              geom_line()+
-              xlab("r (cm)")+
-              theme_prism()
+            # Generate second scan plot
+            nextScan <- dataList$scanData[[scanDataInds[2]]]
+            secondPlot <- generateScanPlotPreview(nextScan,scanDataInd=scanDataInds[2],defaultScansToAnalyze)
             
-            nextScanNumber <- unique(nextScan$Scan)
-            nextScanSpeed <- unique(nextScan$Speed)
-            scanInput2 <- paste("scan",scanDataInds[2],sep="")
-            
-            # Create second observe event
-            observeEvent(eval(parse(text=paste('input$scan',scanDataInds[2],sep=""))),{
-              # Retrieve value and scan
-              value <- eval(parse(text=paste('input$scan',scanDataInds[2],sep="")))
-        
-              if(value){
-                scansToAnalyze <- c(nextScanNumber,scansToAnalyze)
-                scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
-              } else{
-                scansToAnalyze <- scansToAnalyze[-which(scansToAnalyze==nextScanNumber)]
-              }
-              .GlobalEnv$scansToAnalyze <- scansToAnalyze
-              
-              if(length(scansToAnalyze)>0){
-                updateLog(paste("Scans included: ",paste(scansToAnalyze,collapse=", "),sep="")) 
-              } else{
-                if(!is.null(scansToAnalyze)){
-                  updateLog("No scans included")
-                }
-              }
-              
-              # Update process tab
-              renderProcess()
-              
-            })
-            
-            secondPlot <- div(
-              class='column',style='width:fit-content;',
-              div(class='row',style='margin:10px;',
-                  div(
-                    class='column',style='width:fit-content;',
-                    renderPlot(scanPlot2,300,height=200)
-                  ),
-                  div(
-                    class='column',style='width:100px;align-items:flex-start;margin-left:10px;',
-                    p(HTML(paste("<b>Scan ",nextScanNumber,"</b>",sep="")),class='body'),
-                    p(HTML(paste(nextScanSpeed," rpm",sep="")),class='body'),
-                    checkboxInput(scanInput2,"Include",0,width=300)
-                  )
-              )
-            )
-            
+            # Return ui
             div(style='display:flex;flex-direction:column',
                 div(class='row',style='margin:10px;',
                     firstPlot,
                     secondPlot
                 )
             ) # parent div 
+            
           } else{
+            
+            # Return ui
             div(style='display:flex;flex-direction:column',
                 div(class='row',style='margin:10px;',
                     firstPlot
                 )
             ) # parent div
+            
           }
           
         })
       )
     })
+    
+  }
+  
+  # When user uploads data
+  observeEvent(input$uploadInput,{
+    
+    stop <- ''
+    
+    # Reset vars
+    defineVars()
+    updateLog('UltraAnalysis loaded')
+    
+    # Reset ui
+    resetUI()
+    
+    # Get uploaded file
+    uploadInput <- input$uploadInput
+    file <- uploadInput$datapath
+    
+    # Update log
+    updateLog(paste("Uploaded ",length(file)," files",sep=""))
+    
+    # Create progress bar
+    progress <- shiny::Progress$new()
+    progress$set(message='Loading uploaded file...',value=0.1)
 
-    progress$close()
+    if(str_detect(file[1],'.Rdata')){
+      
+      if(length(file)>1){
+        
+        stop <- "You cannot upload multiple .Rdata files at once"
+        
+      } else{
+        
+        # Load to global environment
+        load(file,envir=.GlobalEnv)
+        
+        # Render UIs
+        defaultScansToAnalyze <- dataList$scansToAnalyze
+        renderSavedSelections()
+        renderScanPlot()
+        renderScanSelection()
+        renderModelTypeSelection()
+        
+      }
+      
+    } else{
+      # Read each scan
+      progress$set(message='Reading scan data...',value=0.5)
+      scanData <- readScans(file)
+      
+      # Update the datalist with scan data
+      updateDataList('scanData',scanData)
+      defaultScansToAnalyze <- NULL
+    }
+    
+    if(stop==''){
+      # Format scan plot output
+      renderScanPlots(defaultScansToAnalyze)
+      
+      # Close progress bar
+      progress$close()
+      
+      #defaultScansToAnalyze <- NULL
+    } else{
+      updateLog(stop)
+    }
     
   })
   
+  
+  # ------------ PROCESS
+  
+  # Function to render sector preview
+  renderSectorPreview <- function(sectorLabel,bothPlots){
+
+    # Render output
+    output$sectorPlotFrame <- renderUI(
+      
+      div(
+        class='column',
+        p(sectorLabel),
+        renderPlot(
+          bothPlots,
+          width=350,
+          height=180
+        ),
+        div(style='margin:10px auto;',
+            textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
+        ),
+        div(style='margin:-10px auto;',
+            actionButton('saveSector',label="💾 Save sector")
+        )
+      )
+      
+    )
+  }
+  
   # Function to render scan plot
-  output$sectorPlotFrame <- NULL
   renderScanPlot <- function(selectedSector=NULL,sectorLabel=NULL,bothPlots=NULL){
+
+    currentScanData <- dataList$scanData[[dataList$selectedScan]]
     
     if(length(currentScanData)==0){
       return()
@@ -399,26 +500,7 @@ function(input, output, session) {
       
       scanDataToPlot <- subset(currentScanData,r>(as.numeric(selectedSector$xmin)*0.99)&r<(as.numeric(selectedSector$xmax)*1.01))
     
-      # Render output
-      output$sectorPlotFrame <- renderUI(
-        
-        div(
-          class='column',
-          p(sectorLabel),
-          renderPlot(
-            bothPlots,
-            width=350,
-            height=180
-          ),
-          div(style='margin:10px auto;',
-              textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
-          ),
-          div(style='margin:-10px auto;',
-              actionButton('saveSector',label="💾 Save sector")
-          )
-        )
-        
-      )
+      renderSectorPreview(sectorLabel,bothPlots)
       
     } else{
       scanDataToPlot <- currentScanData
@@ -429,10 +511,10 @@ function(input, output, session) {
       theme_prism()
     
     # Check which selections are in the current scan
-    savedSectors <- bind_rows(savedSectors)
-    if(nrow(savedSectors)>0){
+    savedSectorsDf <- bind_rows(dataList$savedSectors)
+    if(nrow(savedSectorsDf)>0){
       
-      inScan <- subset(savedSectors,Scan==selectedScan)
+      inScan <- subset(savedSectorsDf,Scan==dataList$selectedScan)
       
       # Get data within ranges
       dataInRange <- lapply(1:nrow(inScan),function(x){
@@ -448,8 +530,6 @@ function(input, output, session) {
         sub$Color <- row$Color
         return(sub)
       
-      
-        
       }) %>% bind_rows()
   
       if(nrow(dataInRange)>0){
@@ -467,29 +547,35 @@ function(input, output, session) {
     
   }
   
-  
-  # ------------ PROCESS
-  
-  
   # When user selects a scan to see up close
   observeEvent(input$selectScan,{
-    .GlobalEnv$selectedScan <- input$selectScan
     
-    if(selectedScan!=""){
-      # Get scan data
-      .GlobalEnv$currentScanData <- scanData[[as.numeric(selectedScan)]]
-      
+    selectedScan <- as.numeric(input$selectScan)
+    
+    if(!is.na(selectedScan)){
+      # Update data list
+      updateDataList('selectedScan',selectedScan)
       # Plot
       renderScanPlot()
-
     }
     
   })
   
-  # When user selects a brush
+  # When user brushes an area on the plot (selects a sector)
   observeEvent(input$selectingSector,{
     
+    currentScanData <- dataList$scanData[[dataList$selectedScan]]
     selectedSector <- input$selectingSector
+    
+    # If selectedSector is alreayd equal to the selected sector, then return instead of running 2x
+    if(length(dataList$selectedSector)>0){
+      if(selectedSector$xmax==dataList$selectedSector$xmax&&selectedSector$xmin==dataList$selectedSector$xmin){
+        return()
+      }
+    }
+    
+    # Update datalist
+    updateDataList('selectedSector',selectedSector)
 
     # Get sector data from scan data
     sectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
@@ -504,8 +590,9 @@ function(input, output, session) {
     preds <- tryCatch(predict(linearFit,sectorData),error=function(e)return(NA))
     sectorData$pAr <- preds
     
+    # Generate df to match with currently selected area
     tmpData <- data.frame(
-      Scan = selectedScan,
+      Scan = dataList$selectedScan,
       Min = min(sectorData$r),
       Max = max(sectorData$r),
       n = nrow(sectorData)
@@ -520,8 +607,8 @@ function(input, output, session) {
     }
     
     # Format current sector dataframe
-    .GlobalEnv$currentSectorDf <- data.frame(
-      Scan = selectedScan,
+    currentSectorDf <- data.frame(
+      Scan = dataList$selectedScan,
       Min = min(sectorData$r),
       Max = max(sectorData$r),
       n = nrow(sectorData)
@@ -572,11 +659,75 @@ function(input, output, session) {
   observeEvent(input$resetPlotView,{
     renderScanPlot()
   })
+  
+  # When user saves a selection
+  observeEvent(input$saveSector,{
+    
+    # Get receptor concentration
+    receptorConcentration <- tryCatch(ifelse(input$receptorInput=="",0,input$receptorInput),error=function(e)return(0))
+    
+    # Get scan data
+    currentScanData <- dataList$scanData[[dataList$selectedScan]]
+    
+    # Get sector data
+    selectedSector <- dataList$selectedSector
+    
+    # Get current sector df
+    currentSectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
+    
+    # Get current sector df
+    currentSectorDf <- data.frame(
+      Scan=dataList$selectedScan,
+      Min=min(currentSectorData$r),
+      Max=max(currentSectorData$r),
+      n=nrow(currentSectorData)
+    )
+    currentSectorDf$Receptor <- receptorConcentration
+    
+    # Define sector ID
+    sectorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+    
+    # Get saved sectors
+    savedSectors <- dataList$savedSectors
+    
+    # Check if sector ID already exists
+    otherIDs <- unlist(lapply(savedSectors,'[[',6))
+    
+    if(!(sectorID%in%otherIDs)){
+      currentSectorDf$ID <- sectorID
+      
+      # Define sector color
+      currentSectorDf$Color <- sample(colorVec,1)
+      
+      newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
+      tryCatch(updateLog(newSectorLog),error=function(e)return())
+      
+      # Save as list
+      savedSectors[[length(savedSectors)+1]] <- currentSectorDf
+      
+      # Update dataList
+      updateDataList('savedSectors',savedSectors)
+      
+      # Create hook for editing 
+      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+        editSelectedSector(sectorID)
+      })
+      
+      # Update UI
+      renderSavedSelections()
+      
+      # Update plot
+      session$resetBrush('selectingSector')
+      renderScanPlot()
+    }
+    
+    
+  })
 
   # Function to render saved selections
   renderSavedSelections <- function(){
 
-    if(length(savedSectors)==0){
+    if(length(dataList$savedSectors)==0){
       output$savedSectorUI <- NULL
       return()
     }
@@ -585,9 +736,9 @@ function(input, output, session) {
     output$savedSectorUI <- renderUI({
       
       div(class='column',style='align-items:center;width;100%;',
-        lapply(1:length(savedSectors),function(x){
+        lapply(1:length(dataList$savedSectors),function(x){
           
-          tmpSector <- savedSectors[[x]]
+          tmpSector <- dataList$savedSectors[[x]]
           sectorID <- tmpSector$ID
           colorString <- paste(as.numeric(col2rgb(tmpSector$Color)[,1]),collapse=',')
           
@@ -617,10 +768,12 @@ function(input, output, session) {
       
     })
   }
-  renderSavedSelections()
   
-  # Define function to edit a secotr
+  # Define function to edit a sector
   editSelectedSector <- function(receptorID){
+    
+    savedSectors <- dataList$savedSectors
+    
     ids <- lapply(savedSectors,'[[',6) %>% unlist()
     idToRemove <- which(ids==receptorID)
     
@@ -630,56 +783,12 @@ function(input, output, session) {
     updateLog(removeSectorLog)
     
     savedSectors <- savedSectors[-idToRemove]
-    .GlobalEnv$savedSectors <- savedSectors
+    updateDataList('savedSectors',savedSectors)
     
     #Update UI
     renderSavedSelections()
     renderScanPlot()
   }
-  
-  # When user saves a selection
-  observeEvent(input$saveSector,{
-    
-    
-    # Get receptor concentration
-    receptorConcentration <- ifelse(input$receptorInput=="",0,input$receptorInput)
-    currentSectorDf$Receptor <- receptorConcentration
-    
-    # Define sector ID
-    sectorID <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
-    
-    # Check if sector ID already exists
-    otherIDs <- unlist(lapply(savedSectors,'[[',6))
-    
-    if(!(sectorID%in%otherIDs)){
-      currentSectorDf$ID <- sectorID
-      
-      # Define sector color
-      currentSectorDf$Color <- sample(colorVec,1)
-      
-      newSectorLog <- paste("Added sector: Scan ",currentSectorDf$Scan," Min ",currentSectorDf$Min,' Max ',currentSectorDf$Max, " n = ",currentSectorDf$n,sep="")
-      updateLog(newSectorLog)
-      
-      # Save as list
-      savedSectors[[length(savedSectors)+1]] <- currentSectorDf
-      .GlobalEnv$savedSectors <- savedSectors
-    
-      # Create hook for editing 
-      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
-        editSelectedSector(sectorID)
-      })
-  
-      # Update UI
-      renderSavedSelections()
-      
-      # Update plot
-      session$resetBrush('selectingSector')
-      renderScanPlot()
-    }
-    
-    
-  })
-  
   
   # ------------ FIT
   
@@ -687,7 +796,8 @@ function(input, output, session) {
   observeEvent(input$modelType,{
   
     # Render UI for model parms
-    .GlobalEnv$selectedModel <- input$modelType
+    selectedModel <- input$modelType
+    updateDataList('selectedModel',selectedModel)
     
   
     output$modelParms <- renderUI({
@@ -733,7 +843,12 @@ function(input, output, session) {
       }
     }
     
-   
+    # Update datalist
+    updateDataList('psvValue',psv)
+    updateDataList('psvValue',sd)
+    
+    # Get saved sectors
+    savedSectors <- dataList$savedSectors 
     
     # Loop through saved sectors
     if(length(savedSectors)==0){
@@ -748,7 +863,7 @@ function(input, output, session) {
       sector <- savedSectors[[x]]
       
       # Get data from scan
-      sectorScan <- scanData[[as.numeric(sector$Scan)]]
+      sectorScan <- dataList$scanData[[as.numeric(sector$Scan)]]
       
       # Subset out sector
       data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
@@ -794,7 +909,7 @@ function(input, output, session) {
       
     }) %>% bind_rows()
     
-    if(selectedModel=='MW / Single ideal species'){
+    if(dataList$selectedModel=='MW / Single ideal species'){
       
       # Fit for MW
       mwFit <-  gsl_nls(
@@ -805,7 +920,7 @@ function(input, output, session) {
       )
       
       # Extract fitted Mb
-      mwFitSummary <- summarizeNLS(mwFit,selectedModel)
+      mwFitSummary <- summarizeNLS(mwFit,dataList$selectedModel)
       
       # Update log
       tryCatch(updateLog(mwFitSummary$summary),error=function(e){return()})
@@ -860,10 +975,10 @@ function(input, output, session) {
     output$fitResult <- renderUI({
       
       #Define download handler
-      output$downloadFit<-downloadHandler(
+      output$downloadFit <- downloadHandler(
         
         filename=function(){
-          paste("ULTRAANALYSIS_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".csv",sep="")
+          paste("UA_FIT_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".csv",sep="")
         },
         content=function(file){
           write.csv(baselineFits,file=file,row.names=FALSE)
@@ -871,7 +986,18 @@ function(input, output, session) {
         
       )#download handler
       
-    
+      output$downloadExperiment <- downloadHandler(
+        
+        filename=function(){
+          paste("UA_EXP_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".Rdata",sep="")
+        },
+        content=function(file){
+          save(dataList,file=file)
+        }
+        
+      )
+      
+      # UI
       div(
         class='row',
         div(
@@ -889,9 +1015,17 @@ function(input, output, session) {
             )
           ),
           div(
-            class='row',style='align-self:center;margin-top;10px',
-            downloadButton("downloadFit","Download")
-          )
+            class='row',style='margin-top:15px;align-self:flex-end',
+            p('Download',class='header')
+          ),
+          div(
+            class='row',style='align-self:flex-end;',
+            downloadButton("downloadFit","Fit data",icon=icon('database'))
+          ),
+          div(
+            class='row',style='align-self:flex-end;margin-top:10px',
+            downloadButton("downloadExperiment","Experiment file",icon=icon('flask'))
+          ),
         )
       )
       

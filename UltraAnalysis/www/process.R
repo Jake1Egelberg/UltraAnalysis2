@@ -1,10 +1,9 @@
-
 div(
   class='row',style='height:65vh;',
   div(
     class='column',style='width:19%;height:100%;padding:10px;',
     p('Included scans',class='header'),
-    selectInput('selectScan',NULL,choices=scansToAnalyze,multiple=FALSE,width=300),
+    uiOutput('scanSelectionInput'),
     
     p('Saved sectors',class='header'),
     

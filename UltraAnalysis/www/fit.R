@@ -4,7 +4,7 @@ div(
   div(
     class='column',style='width:19%;height:100%;padding:10px;',
     p('Model to fit',class='header'),
-    selectInput('modelType',NULL,choices=modelTypes,selected=selectedModel,multiple=FALSE,width=300),
+    uiOutput('modelTypeSelection'),
     uiOutput('modelParms')
   ), # Column 1
   div(
@@ -12,7 +12,7 @@ div(
   ), # divider column
   div(
     class='column',style='padding:10px;',
-    p(paste("Global fit for: ",selectedModel,sep=""),class='header'),
+    p(paste("Global fit for: ",dataList$selectedModel,sep=""),class='header'),
     uiOutput('fitResult')
   ), #column 2
   
