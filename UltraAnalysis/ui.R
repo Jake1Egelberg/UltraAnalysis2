@@ -22,6 +22,7 @@ fluidPage(
   tags$link(rel = "stylesheet", type = "text/css", href = "styles.css"), # link external stylesheet 
   p('UltraAnalysis V1.0.0',style='position:absolute;right:2vw;top:3vh;z-index:100;font-size:20px;',class='header'),
   tabsetPanel(
+    id='tabSwitch',
     tabPanel(
       value='upload',
       title='📂 Upload',

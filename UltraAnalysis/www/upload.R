@@ -6,8 +6,8 @@ div(
     p('Upload scans (.RA) or a UA experiment file (.Rdata)',class='header'),
     fileInput('uploadInput',NULL,TRUE,accept=c(paste(".RA",1:10,sep=""),'.Rdata'),width=300,buttonLabel = '🗉 Select file(s)',placeholder = '0 file(s)'),
     p('Global parameters',class='header'),
-    textInput('psvInput',NULL,dataList$psvValue,300,'Partial specific volume (mL/g)'),
-    textInput('sdInput',NULL,dataList$sdValue,300,'Solvent density (g/mL)')
+    uiOutput('psvInputArea'),
+    uiOutput('sdInputArea')
   ), # Column 1
   div(
     class='column',style='width:1%;height:90%;border-left: 1.5px solid #002060;margin-left:1%;align-self:center',

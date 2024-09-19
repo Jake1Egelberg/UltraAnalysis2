@@ -98,7 +98,7 @@
 
 # function to get random character
 .GlobalEnv$getRandomCharacter <- function(){
-  id <- paste('r',as.character(round(as.numeric(Sys.time()))),sep="")
+  id <- paste('r',sample(1:10000)[1],sep="")
   return(id)
 }
 
@@ -222,16 +222,18 @@ function(input, output, session) {
   }
   
   # Automatically find the meniscus
-  findMenisci <- function(tmp){
+  findMenisci <- function(x,allScanData){
+    
+    tmp <- allScanData[[x]]
     
     sectorNum <- 3
     
     # Get scan number
     scanNumber <- unique(tmp$Scan)
     
-    updateLog(paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep=""))
-    progress$set(message=paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep=""),
-                 value=(scanNumber-1)/length(dataList$scansToAnalyze))
+    tryCatch(updateLog(paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep="")),error=function(e)return())
+    progress$set(message=paste("Finding sectors for Scan ",scanNumber," (",x," of ",length(allScanData),")",sep=""),
+                 value=(x-1)/length(allScanData))
     
     # Get derivative for clustering
     tmp$Dr <- c(0,diff(tmp$Ar))
@@ -242,7 +244,6 @@ function(input, output, session) {
     
     # Cluster into 3 groups by x,y position
     clustVec <- sqrt(tmp$Dr^2+tmp$r^2)
-    set.seed(123)
     kclust <- kmeans(clustVec,sectorNum)
     clusterVector <- kclust$cluster
     
@@ -321,22 +322,28 @@ function(input, output, session) {
       miniscusData <- subset(sectorData,r>split1&r<split2)
       
       # Format as range
+      sectorID <- getRandomCharacter()
       rangeFormat <- data.frame(
         Scan=scanNumber,
         Min=min(miniscusData$r),
         Max=max(miniscusData$r),
         n=nrow(miniscusData),
         Receptor=0,
-        ID=getRandomCharacter(),
+        ID=sectorID,
         Color=getRandomColor()
       )
+      
+      # Create hook for editing 
+      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
+        editSelectedSector(sectorID)
+      })
       
       return(rangeFormat)
       
       
     }) %>% bind_rows()
     
-    updateLog(paste("Sector finding complete for scan ",scanNumber,sep=""))
+    tryCatch(updateLog(paste("Sector finding complete for scan ",scanNumber,sep="")),error=function(e)return())
     
     # Return ranges
     return(autoRanges)
@@ -352,23 +359,11 @@ function(input, output, session) {
   output$fit <- renderUI({
     source('www/fit.R')[[1]]
   })  
-  renderModelTypeSelection<-function(model){
-    output$modelTypeSelection <- renderUI({
-      selectInput('modelType',NULL,choices=modelTypes,selected=model,multiple=FALSE,width=300)
-    })
-  }
 
   # Render process tab
   output$process <- renderUI({
     source('www/process.R')[[1]]
   })
-  renderScanSelection <- function(){
-    
-    output$scanSelectionInput <- renderUI({
-      selectInput('selectScan',NULL,choices=dataList$scansToAnalyze,selected=dataList$scansToAnalyze[1],multiple=FALSE,width=300)
-    })
-    
-  }
   
   # Reset the ui
   resetUI <- function(){
@@ -391,7 +386,73 @@ function(input, output, session) {
     updateLog('UltraAnalysis loaded')
   })
   
+  
+  # ------------ ON TAB SWITCH
+  
+  
+  # Observe a tab switch
+  observeEvent(input$tabSwitch,{
+    
+    if(input$tabSwitch=='upload'){
+      renderPsvInput()
+      renderSdInput()
+    }
+    
+    if(input$tabSwitch=='process'){
+      renderScanSelection()
+      renderScanPlot()
+      renderSavedSelections()
+    }
+    
+    if(input$tabSwitch=='fit'){
+      modelTypeToShow <- ifelse(length(dataList$modelType)==0,modelTypes[1],dataList$modelType)
+      renderModelTypeSelection(modelTypeToShow)
+    }
+    
+  })
+  
+  
   # ------------ UPLOAD
+  
+  # Function when someone checks a scan to include
+  includeScan <- function(scanDataInd,scanNumber){
+    
+    observeEvent(eval(parse(text=paste('input$scan',scanDataInd,sep=""))),{
+      
+      # Retrieve value and scan
+      value <- eval(parse(text=paste('input$scan',scanDataInd,sep="")))
+      
+      # Update scans to analyze
+      if(value){
+        
+        if(!(scanNumber%in%dataList$scansToAnalyze)){
+          scansToAnalyze <- c(scanNumber,dataList$scansToAnalyze)
+          scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
+        } else{
+          scansToAnalyze <- dataList$scansToAnalyze
+        }
+        
+      } else{
+        if(scanNumber%in%dataList$scansToAnalyze){
+          scansToAnalyze <- dataList$scansToAnalyze[-which(dataList$scansToAnalyze==scanNumber)] 
+        } else{
+          scansToAnalyze <- dataList$scansToAnalyze
+        }
+      }
+      
+      updateDataList('scansToAnalyze',scansToAnalyze)
+      
+      # Update saved sectors
+      if(length(dataList$savedSectors)>0){
+        sectorScans <- lapply(dataList$savedSectors,'[[',1)%>%unlist()
+        savedSectorsToInclude <- which(sectorScans%in%scansToAnalyze)
+        newSectors <- dataList$savedSectors[savedSectorsToInclude]
+        updateDataList('savedSectors',newSectors)
+      }
+      
+    })
+    
+  }
   
   # Render preview of scan data within scanPlotPreviews
   generateScanPlotPreview <- function(currentScan,scanDataInd,defaultScansToAnalyze){
@@ -417,34 +478,7 @@ function(input, output, session) {
     }
     
     # Create observe event when someone selects a scan to include
-    observeEvent(eval(parse(text=paste('input$scan',scanDataInd,sep=""))),{
-      # Retrieve value and scan
-      value <- eval(parse(text=paste('input$scan',scanDataInd,sep="")))
-      
-     
-      if(value){
-       
-        if(!(scanNumber%in%dataList$scansToAnalyze)){
-          scansToAnalyze <- c(scanNumber,dataList$scansToAnalyze)
-          scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
-        } else{
-          scansToAnalyze <- dataList$scansToAnalyze
-        }
-    
-      } else{
-        if(scanNumber%in%dataList$scansToAnalyze){
-          scansToAnalyze <- dataList$scansToAnalyze[-which(dataList$scansToAnalyze==scanNumber)] 
-        } else{
-          scansToAnalyze <- dataList$scansToAnalyze
-        }
-      }
-    
-      updateDataList('scansToAnalyze',scansToAnalyze)
-      
-      # Update process tab
-      renderScanSelection()
-      
-    })
+    includeScan(scanDataInd,scanNumber)
     
     firstPlot <- div(
       class='column',style='width:fit-content;',
@@ -560,12 +594,17 @@ function(input, output, session) {
         # Load to global environment
         load(file,envir=.GlobalEnv)
         
+        # Generate hooks for saved sectors
+        savedSectors <- dataList$savedSectors
+        lapply(savedSectors,function(x){
+          # Create hook for editing 
+          observeEvent(eval(parse(text=paste('input$',x$ID,sep=""))),{
+            editSelectedSector(x$ID)
+          })
+        })
+        
         # Render UIs
         defaultScansToAnalyze <- dataList$scansToAnalyze
-        renderSavedSelections()
-        renderScanPlot()
-        renderScanSelection()
-        renderModelTypeSelection(dataList$modelType)
         
       }
       
@@ -577,12 +616,15 @@ function(input, output, session) {
       # Update the datalist with scan data
       updateDataList('scanData',scanData)
       defaultScansToAnalyze <- NULL
-      renderModelTypeSelection(modelTypes[1])
     }
     
     if(stop==''){
       # Format scan plot output
       renderScanPlots(defaultScansToAnalyze)
+      
+      # Render global inputs
+      renderPsvInput()
+      renderSdInput()
       
       # Close progress bar
       progress$close()
@@ -594,8 +636,29 @@ function(input, output, session) {
     
   })
   
+  # Render psv input
+  renderPsvInput <- function(){
+    output$psvInputArea <- renderUI({
+      textInput('psvInput',NULL,dataList$psvValue,300,'Partial specific volume (mL/g)')
+    })
+  }
+  renderSdInput <- function(){
+    output$sdInputArea <- renderUI({
+      textInput('sdInput',NULL,dataList$sdValue,300,'Solvent density (g/mL)')
+    })
+  }
+  
   
   # ------------ PROCESS
+  
+  # Render selection of scan
+  renderScanSelection <- function(){
+    
+    output$scanSelectionInput <- renderUI({
+      selectInput('selectScan',NULL,choices=dataList$scansToAnalyze,selected=dataList$scansToAnalyze[1],multiple=FALSE,width=300)
+    })
+    
+  }
   
   # Function to render sector preview
   renderSectorPreview <- function(sectorLabel,bothPlots){
@@ -625,6 +688,14 @@ function(input, output, session) {
   # Function to render scan plot
   renderScanPlot <- function(selectedSector=NULL,sectorLabel=NULL,bothPlots=NULL){
 
+    if(length(dataList$selectedScan)==0){
+      return()
+    }
+    
+    if(length(dataList$scanData)==0){
+      return()
+    }
+    
     currentScanData <- dataList$scanData[[dataList$selectedScan]]
     
     if(length(currentScanData)==0){
@@ -905,12 +976,12 @@ function(input, output, session) {
   }
   
   # Define function to edit a sector
-  editSelectedSector <- function(receptorID){
-    
+  editSelectedSector <- function(sectorID){
+
     savedSectors <- dataList$savedSectors
     
     ids <- lapply(savedSectors,'[[',6) %>% unlist()
-    idToRemove <- which(ids==receptorID)
+    idToRemove <- which(ids==sectorID)[1]
     
     sectorToRemove <- savedSectors[[idToRemove]]
     # Update log
@@ -932,6 +1003,10 @@ function(input, output, session) {
       return()
     }
     
+    if(length(dataList$scanData)==0){
+      return()
+    }
+    
     # Create progress bar
     .GlobalEnv$progress <- shiny::Progress$new()
     progress$set(message='Loading data...',value=0)
@@ -940,7 +1015,7 @@ function(input, output, session) {
     allScanData <- dataList$scanData[dataList$scansToAnalyze]
    
     # Find menisci
-    identifiedSectors <- lapply(allScanData,findMenisci) %>% bind_rows()
+    identifiedSectors <- lapply(1:length(allScanData),findMenisci,allScanData) %>% bind_rows()
     
     # Covnert each row to a list
     identifiedSectorsList <- lapply(1:nrow(identifiedSectors),function(x){return(identifiedSectors[x,])})
@@ -966,6 +1041,13 @@ function(input, output, session) {
   
   # ------------ FIT
   
+  # Render the model type to display
+  renderModelTypeSelection<-function(model){
+    output$modelTypeSelection <- renderUI({
+      selectInput('modelType',NULL,choices=modelTypes,selected=model,multiple=FALSE,width=300)
+    })
+  }
+  
   # When user selects a model type
   observeEvent(input$modelType,{
   
@@ -987,7 +1069,6 @@ function(input, output, session) {
     
   })
   
-  
   # When user tries to fit the data
   observeEvent(input$fitData,{
     
@@ -1006,26 +1087,25 @@ function(input, output, session) {
         updateLog("Invalid partial specific volume (PSV). Defaulting to 0.71 mL/g")
         psv <- 0.71
       } else{
-        psv <- input$psvInput
+        psv <- as.numeric(input$psvInput)
       }
       
       if(input$sdInput==""){
         updateLog("Invalid solvent density (SD) input. Defaulting to 1.003 g/mL")
         sd <- 1.003
       } else{
-        sd <- input$sdInput
+        sd <- as.numeric(input$sdInput)
       }
     }
     
     # Update datalist
     updateDataList('psvValue',psv)
-    updateDataList('psvValue',sd)
+    updateDataList('sdValue',sd)
     
     # Get saved sectors
     savedSectors <- dataList$savedSectors 
     
     # Loop through saved sectors
-    print(length(savedSectors))
     if(length(savedSectors)==0){
       updateLog("No sectors to fit. Save sectors to fit a model.")
       return()
@@ -1033,7 +1113,6 @@ function(input, output, session) {
     
     # Fit baselines
     baselineFits <- lapply(1:length(savedSectors),function(x){
-      
       # Get sector
       sector <- savedSectors[[x]]
       
@@ -1084,7 +1163,6 @@ function(input, output, session) {
       
     }) %>% bind_rows()
     
-    print(dataList$selectedModel)
     
     if(length(dataList$selectedModel)==0){
       selectedModel <- input$modelType
@@ -1132,7 +1210,7 @@ function(input, output, session) {
       # Plot linear
       linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
         geom_point(aes(y=log((Ar-offset)/A0)))+
-        geom_line(aes(y=log((pAr-offset)/A0)),col='red')+
+        geom_line(aes(y=log((pAr-offset)/A0),group=ID),col='red')+
         xlab("(r^2 - r0^2) / 2")+
         ylab("ln( (Ar - offset) / A0 )")+
         theme_prism()
