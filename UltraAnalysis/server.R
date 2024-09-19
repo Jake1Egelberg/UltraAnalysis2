@@ -1265,7 +1265,8 @@ function(input, output, session) {
       sector <- savedSectors[[x]]
       
       # Get data from scan
-      scanInd <- which(dataList$absoluteScanNumbers==as.numeric(sector$Scan))
+      allScans <- unique(lapply(dataList$scanData,'[[','AbsoluteScan') %>% unlist())
+      scanInd <- which(allScans==as.numeric(sector$Scan))
       sectorScan <- dataList$scanData[[scanInd]]
       
       # Subset out sector
@@ -1370,14 +1371,6 @@ function(input, output, session) {
         xlab("(r^2 - r0^2) / 2")+
         ylab("ln( (Ar - offset) / A0 )")+
         theme_prism()
-      
-      # Format grid
-      plotgrid <- plot_grid(
-        nonlinear,
-        linear,
-        ncol=2,
-        nrow=1
-      )
       
       parmRow <- div(
         class='column',
@@ -1490,13 +1483,6 @@ function(input, output, session) {
         theme_prism()+
         theme(legend.position='top')
       
-      # Format grid
-      plotgrid <- plot_grid(
-        nonlinear,
-        linear,
-        ncol=2,
-        nrow=1
-      )
       
       parmRow <- div(
         class='column',
@@ -1504,34 +1490,37 @@ function(input, output, session) {
         p(HTML(paste("<b>KaA</b> = ",round(kaCoef$Estimate,3)," +/- ",round(kaCoef$`Std. Error`,3),sep="")),class='body'),
         p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
       )
-      plotgrid <- plotgrid
       
     }
+    
+    # Render plots as outputs
+    output$nonlinearPlot <- renderPlot(nonlinear,width=325,height=300)
+    output$linearPlot <- renderPlot(linear,width=325,height=300)
+    
+    # Update data list with the plots
+    .GlobalEnv$linearPlot <- linear
+    .GlobalEnv$nonlinearPlot <- nonlinear
     
     # Render ui
     output$fitResult <- renderUI({
       
       #Define download handler
       output$downloadFit <- downloadHandler(
-        
         filename=function(){
           paste("UA_FIT_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".csv",sep="")
         },
         content=function(file){
           write.csv(baselineFits,file=file,row.names=FALSE)
         }
-        
       )#download handler
       
       output$downloadExperiment <- downloadHandler(
-        
         filename=function(){
           paste("UA_EXP_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".Rdata",sep="")
         },
         content=function(file){
           save(dataList,file=file)
         }
-        
       )
       
       # UI
@@ -1539,7 +1528,11 @@ function(input, output, session) {
         class='row',
         div(
           class='column',style='width:fit-contents;margin-left:15px;',
-          renderPlot(plotgrid,width=750,height=300)
+          plotOutput('nonlinearPlot',click='clickFitResultNonlinear',dblclick='resetFitPlots')
+        ),
+        div(
+          class='column',style='width:fit-contents;margin-left:15px;',
+          plotOutput('linearPlot',click='clickFitResultLinear',dblclick='resetFitPlots')
         ),
         div(
           class='column',style='width:fit-contents;margin-left:30px',
@@ -1566,6 +1559,85 @@ function(input, output, session) {
     
   })
   
+  # When user clicks linear plot
+  observeEvent(input$clickFitResultLinear,{
+    
+    .GlobalEnv$userClick <- input$clickFitResultLinear
+    
+    # Get linear plot data
+    linearPlot <- linearPlot
+    linearPlotData <- linearPlot$data
+    
+    # Get x and y
+    x <- (linearPlotData$r^2-linearPlotData$r0^2)/2
+    y <- log((linearPlotData$Ar-linearPlotData$offset)/linearPlotData$A0)
+    
+    # Get errs
+    errs <- sqrt((userClick$x-x)^2+(userClick$y-y)^2)
+    nearestPoint <- linearPlotData[which(errs==min(errs,na.rm=TRUE)),]
+    
+    # Get sector data
+    sectorData <- subset(linearPlotData,ID==nearestPoint$ID)
+    
+    # Rerender plot with nearest point
+    newPlot <- linearPlot+
+      geom_point(data=nearestPoint,aes(x=(r^2-r0^2)/2,
+                                       y=log((Ar-offset)/A0)),
+                 col='blue',size=4)+
+      geom_label(data=nearestPoint,aes(x=min(x,na.rm=TRUE),
+                                      y=max(y,na.rm=TRUE)*0.95),
+                label=paste("Scan ",
+                            nearestPoint$AbsoluteScan,
+                            " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
+                            '\n(',round((nearestPoint$r^2-nearestPoint$r0^2)/2,3),
+                            ', ',round(log((nearestPoint$Ar-nearestPoint$offset)/nearestPoint$A0),3),')',
+                            sep=""),col='blue',hjust=0,fontface='bold')
+    
+    output$linearPlot <- renderPlot(newPlot,width=325,height=300)
+    
+  })
   
-
+  # When user clicks nonlinear plot
+  observeEvent(input$clickFitResultNonlinear,{
+    
+    .GlobalEnv$userClick <- input$clickFitResultNonlinear
+    
+    # Get linear plot data
+    nonlinearPlot <- nonlinearPlot
+    nonlinearPlotData <- nonlinearPlot$data
+    
+    # Get x and y
+    x <- nonlinearPlotData$r
+    y <- nonlinearPlotData$Ar-nonlinearPlotData$offset
+    
+    # Get errs
+    errs <- sqrt((userClick$x-x)^2+(userClick$y-y)^2)
+    nearestPoint <- nonlinearPlotData[which(errs==min(errs,na.rm=TRUE)),]
+    
+    # Get sector data
+    sectorData <- subset(nonlinearPlotData,ID==nearestPoint$ID)
+    
+    # Rerender plot with nearest point
+    newPlot <- nonlinearPlot+
+      geom_point(data=nearestPoint,aes(x=r,
+                                       y=Ar-offset),
+                 col='blue',size=4)+
+      geom_label(data=nearestPoint,aes(x=min(x,na.rm=TRUE),
+                                      y=max(y,na.rm=TRUE)*0.95),
+                label=paste("Scan ",
+                            nearestPoint$AbsoluteScan,
+                            " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
+                            "\n(",round(nearestPoint$r,3),
+                            ", ",round(nearestPoint$Ar-nearestPoint$offset,3),")",
+                            sep=""),col='blue',hjust=0,fontface='bold')
+    
+    output$nonlinearPlot <- renderPlot(newPlot,width=325,height=300)
+    
+  })
+  
+  # Reset plots
+  observeEvent(input$resetFitPlots,{
+    output$nonlinearPlot <- renderPlot(nonlinearPlot,width=325,height=300)
+    output$linearPlot <- renderPlot(linearPlot,width=325,height=300)
+  })
 }
