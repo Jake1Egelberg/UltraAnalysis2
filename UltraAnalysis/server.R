@@ -12,15 +12,16 @@
 }
 
 # Read each scan
-.GlobalEnv$readScans <- function(file){
+.GlobalEnv$readScans <- function(file,filenames){
   
   # Read each scan
-  readAScan <- function(x,file){
+  readAScan <- function(x,file,filenames){
     
     row <- file[x]
+    filename <- filenames[x]
     
     # Read data
-    .GlobalEnv$scanLines <- read.table(row,header=TRUE,sep="\t")
+    scanLines <- read.table(row,header=TRUE,sep="\t")
     
     # Get scan name
     scanName <- names(scanLines)
@@ -58,12 +59,16 @@
     
     R <- 8.314 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
     
+    # Get scan number
+    scanNum <- as.numeric(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1))
+   
     # Create df
     dfValues <- data.frame(
       Name = NA,
       Cell = cellNumber,
       Speed = rpm,
       Scan = x,
+      AbsoluteScan = scanNum,
       r = radialPosition,
       r0=NA,
       w = w,
@@ -89,7 +94,7 @@
     return(curatedValues)
     
   }
-  out <- lapply(1:length(file),readAScan,file=file)
+  out <- lapply(1:length(file),readAScan,file=file,filenames=filenames)
   
   # Name scan list with condition
   cell <- unique(out[[1]]$Cell)
@@ -105,6 +110,12 @@
 # function to get random character
 .GlobalEnv$getRandomCharacter <- function(){
   id <- paste('r',sample(1:10000)[1],sep="")
+  return(id)
+}
+
+# Function to get random number
+.GlobalEnv$getRandomNumber <- function(){
+  id <- sample(1:100000)[1]
   return(id)
 }
 
@@ -199,7 +210,7 @@ testplot <- ggplot(data.frame(x=1:10,y=1:10),aes(x=x,y=y))+
 function(input, output, session) {
 
   # ------------ STARTUP
-
+  
   # Update the log text
   updateLog <- function(update){
     
@@ -212,134 +223,6 @@ function(input, output, session) {
     
   }
   
-  # Automatically find the meniscus
-  findMenisci <- function(x,allScanData){
-    
-    tmp <- allScanData[[x]]
-    
-    sectorNum <- 3
-    
-    # Get scan number
-    scanNumber <- unique(tmp$Scan)
-    
-    tryCatch(updateLog(paste("Finding sectors for Scan ",scanNumber," of ",length(dataList$scansToAnalyze),sep="")),error=function(e)return())
-    progress$set(message=paste("Finding sectors for Scan ",scanNumber," (",x," of ",length(allScanData),")",sep=""),
-                 value=(x-1)/length(allScanData))
-    
-    # Get derivative for clustering
-    tmp$Dr <- c(0,diff(tmp$Ar))
-    
-    # Get mean derivative
-    meanDr <- mean(tmp$Dr)
-    tmp$meanDr <- meanDr
-    
-    # Cluster into 3 groups by x,y position
-    clustVec <- sqrt(tmp$Dr^2+tmp$r^2)
-    kclust <- kmeans(clustVec,sectorNum)
-    clusterVector <- kclust$cluster
-    
-    # ORder cluster vector from small to large to keep conssitent
-    clusterVectorOrdered <- clusterVector[order(clusterVector)]
-    
-    tmp$Sector <- clusterVectorOrdered
-    
-    # Plot clusters
-    clusterPlot <- ggplot(tmp,aes(x=r,y=Ar))+
-      #geom_line()+
-      geom_point(data=tmp,aes(y=Dr,col=as.character(Sector)))+
-      geom_hline(yintercept=meanDr,col='red')+
-      theme_prism()
-    
-    # Get sectors
-    autoRanges <- lapply(1:sectorNum,function(sector){
-      
-      sectorData <- subset(tmp,Sector==sector)
-      
-      # Calculate residuals to mean
-      residualsToMean <- abs(sectorData$Dr-mean(sectorData$meanDr))
-      sectorData$residuals <- residualsToMean
-      
-      # Identify regions of consistency among residuals vector
-      splitList <- vector('list',length(residualsToMean))
-      for(y in 2:(length(residualsToMean)-2)){
-        
-        # Get groups
-        group1 <- residualsToMean[1:(y-1)]
-        group2 <- residualsToMean[y:length(residualsToMean)]
-        
-        # Label vector
-        sdList <- lapply(10:length(group2),function(z){
-          # Get other groups
-          group3 <- group2[1:(z-1)]
-          group4 <- group2[z:length(group2)]
-          
-          # Get sd of group 3 (this is what we want to minimize)
-          group3SD <- sd(group3)/length(group3)
-          return(group3SD)
-        }) %>% unlist()
-        
-        # Get best split
-        bestSplitIndex <- which(sdList==min(sdList,na.rm=TRUE))
-        bestSplitValue <- group2[bestSplitIndex]
-        trueIndex <- which(residualsToMean==bestSplitValue)
-        
-        splitList[[y]]$split1 <- y
-        splitList[[y]]$split2 <- trueIndex
-        splitList[[y]]$error <- sdList[bestSplitIndex]
-      }
-      
-      # Curate
-      splitCur <- splitList[!unlist(lapply(splitList,is.null))]
-      
-      # Get best split
-      splitErrs <- lapply(splitCur,'[[',3) %>% unlist()
-      bestSplit <- splitCur[which(splitErrs==min(splitErrs))][[1]]
-      
-      # Get splits in terms of radius
-      split1data <- sectorData[max(bestSplit$split1),]
-      split1 <- split1data$r
-      split2 <- sectorData[max(bestSplit$split2),]$r
-      
-      # plot
-      sectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
-        geom_point()+
-        geom_vline(xintercept=split1,col='blue')+
-        geom_vline(xintercept=split2,col='blue')+
-        ylab("Ar")+
-        xlab("r")+
-        theme_prism()
-      
-      # Subset out data for identified miniscus
-      miniscusData <- subset(sectorData,r>split1&r<split2)
-      
-      # Format as range
-      sectorID <- getRandomCharacter()
-      rangeFormat <- data.frame(
-        Scan=scanNumber,
-        Min=min(miniscusData$r),
-        Max=max(miniscusData$r),
-        n=nrow(miniscusData),
-        Receptor=0,
-        ID=sectorID,
-        Color=getRandomColor()
-      )
-      
-      # Create hook for editing 
-      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
-        editSelectedSector(sectorID)
-      })
-      
-      return(rangeFormat)
-      
-      
-    }) %>% bind_rows()
-    
-    tryCatch(updateLog(paste("Sector finding complete for scan ",scanNumber,sep="")),error=function(e)return())
-    
-    # Return ranges
-    return(autoRanges)
-    
-  }
   
   # Load upload tab
   output$upload <- renderUI({
@@ -396,7 +279,7 @@ function(input, output, session) {
     }
     
     if(input$tabSwitch=='fit'){
-      modelTypeToShow <- ifelse(length(dataList$modelType)==0,modelTypes[1],dataList$modelType)
+      modelTypeToShow <- ifelse(length(dataList$selectedModel)==0,modelTypes[1],dataList$selectedModel)
       renderModelTypeSelection(modelTypeToShow)
     }
     
@@ -419,6 +302,7 @@ function(input, output, session) {
         if(!(scanNumber%in%dataList$scansToAnalyze)){
           scansToAnalyze <- c(scanNumber,dataList$scansToAnalyze)
           scansToAnalyze <- scansToAnalyze[order(scansToAnalyze)]
+          
         } else{
           scansToAnalyze <- dataList$scansToAnalyze
         }
@@ -432,6 +316,10 @@ function(input, output, session) {
       }
       
       updateDataList('scansToAnalyze',scansToAnalyze)
+      
+      # Get absolute scan numbers for scans to analyze
+      absoluteScanNumbers <- lapply(dataList$scanData[dataList$scansToAnalyze],'[[','AbsoluteScan')%>%unlist()%>%unique()
+      updateDataList('absoluteScanNumbers',absoluteScanNumbers)
       
       # Update saved sectors
       if(length(dataList$savedSectors)>0){
@@ -453,6 +341,7 @@ function(input, output, session) {
       xlab("r (cm)")+
       theme_prism()
     
+    absoluteScanNumber <- unique(currentScan$AbsoluteScan)
     scanNumber <- unique(currentScan$Scan)
     scanSpeed <- unique(currentScan$Speed)
     scanInput1 <- paste("scan",scanDataInd,sep="")
@@ -480,7 +369,7 @@ function(input, output, session) {
           ),
           div(
             class='column',style='width:100px;align-items:flex-start;margin-left:10px;',
-            p(HTML(paste("<b>Scan ",scanNumber,"</b>",sep="")),class='body'),
+            p(HTML(paste("<b>Scan ",absoluteScanNumber,"</b>",sep="")),class='body'),
             p(HTML(paste(scanSpeed," rpm",sep="")),class='body'),
             checkboxInput(scanInput1,"Include",checkValue,width=300)
           )
@@ -566,6 +455,7 @@ function(input, output, session) {
     # Get uploaded file
     uploadInput <- input$uploadInput
     file <- uploadInput$datapath
+    filenames <- uploadInput$name
     
     # Update log
     updateLog(paste("Uploaded ",length(file)," files",sep=""))
@@ -589,9 +479,7 @@ function(input, output, session) {
         savedSectors <- dataList$savedSectors
         lapply(savedSectors,function(x){
           # Create hook for editing 
-          observeEvent(eval(parse(text=paste('input$',x$ID,sep=""))),{
-            editSelectedSector(x$ID)
-          })
+          generateSectorHooks(x)
         })
         
         # Render UIs
@@ -602,7 +490,7 @@ function(input, output, session) {
     } else{
       # Read each scan
       progress$set(message='Reading scan data...',value=0.5)
-      scanData <- readScans(file)
+      scanData <- readScans(file,filenames)
       
       # Update the datalist with scan data
       updateDataList('scanData',scanData)
@@ -642,11 +530,185 @@ function(input, output, session) {
   
   # ------------ PROCESS
   
+  # Function to define a sector
+  createSector <- function(scanNumber,data,receptor=0){
+    
+    randNum <- getRandomNumber()
+    sectorID <- paste('r',randNum,sep="")
+    rangeID <- paste('a',randNum,sep="")
+    
+    sector <- data.frame(
+      Scan=scanNumber,
+      Min=min(data$r),
+      Max=max(data$r),
+      n=nrow(data),
+      Receptor=receptor,
+      ID=sectorID,
+      RangeID = rangeID,
+      Color=getRandomColor()
+    )
+    
+    out <- list()
+    out$sector <- sector
+    out$id <- sectorID
+    return(out)
+    
+  }
+  
+  # Render hooks for saved sector
+  generateSectorHooks <- function(sector){
+    
+    observeEvent(eval(parse(text=paste('input$',sector$ID,sep=""))),{
+      editSelectedSector(sector$ID)
+    })
+    
+    observeEvent(eval(parse(text=paste('input$',sector$RangeID,sep=""))),{
+      zoomToSector(sector$ID)
+    })
+    
+    
+  }
+  
+  # Automatically find the meniscus
+  findMenisci <- function(x,allScanData){
+    
+    tmp <- allScanData[[x]]
+    
+    sectorNum <- 3
+    
+    # Get scan number
+    scanNumber <- unique(tmp$Scan)
+    absoluteScanNumber <- unique(tmp$AbsoluteScan)
+    
+    updateMessage <- paste("Finding sectors for Scan ",absoluteScanNumber," (",x," of ",length(allScanData),")",sep="")
+    tryCatch(updateLog(updateMessage),error=function(e)return())
+    progress$set(message=updateMessage,
+                 value=(x-1)/length(allScanData))
+    
+    # Get derivative for clustering
+    tmp$Dr <- c(0,diff(tmp$Ar))
+    
+    # Get mean derivative
+    meanDr <- mean(tmp$Dr)
+    tmp$meanDr <- meanDr
+    
+    # Cluster into 3 groups by x,y position
+    clustVec <- sqrt(tmp$Dr^2+tmp$r^2)
+    kclust <- kmeans(clustVec,sectorNum)
+    clusterVector <- kclust$cluster
+    
+    # ORder cluster vector from small to large to keep conssitent
+    clusterVectorOrdered <- clusterVector[order(clusterVector)]
+    
+    tmp$Sector <- clusterVectorOrdered
+    
+    # Plot clusters
+    clusterPlot <- ggplot(tmp,aes(x=r,y=Ar))+
+      #geom_line()+
+      geom_point(data=tmp,aes(y=Dr,col=as.character(Sector)))+
+      geom_hline(yintercept=meanDr,col='red')+
+      theme_prism()
+    
+    # Get sectors
+    autoRanges <- lapply(1:sectorNum,function(sector){
+      
+      sectorData <- subset(tmp,Sector==sector)
+      
+      # Calculate residuals to mean
+      residualsToMean <- abs(sectorData$Dr-mean(sectorData$meanDr))
+      sectorData$residuals <- residualsToMean
+      
+      # Identify regions of consistency among residuals vector
+      splitList <- vector('list',length(residualsToMean))
+      for(y in 2:(length(residualsToMean)-2)){
+        
+        # Get groups
+        group1 <- residualsToMean[1:(y-1)]
+        group2 <- residualsToMean[y:length(residualsToMean)]
+        
+        # Label vector
+        sdList <- lapply(10:length(group2),function(z){
+          # Get other groups
+          group3 <- group2[1:(z-1)]
+          group4 <- group2[z:length(group2)]
+          
+          # Get sd of group 3 (this is what we want to minimize)
+          group3SD <- sd(group3)/length(group3)
+          return(group3SD)
+        }) %>% unlist()
+        
+        # Get best split
+        bestSplitIndex <- which(sdList==min(sdList,na.rm=TRUE))
+        bestSplitValue <- group2[bestSplitIndex]
+        trueIndex <- which(residualsToMean==bestSplitValue)
+        
+        splitList[[y]]$split1 <- y
+        splitList[[y]]$split2 <- trueIndex
+        splitList[[y]]$error <- sdList[bestSplitIndex]
+      }
+      
+      # Curate
+      splitCur <- splitList[!unlist(lapply(splitList,is.null))]
+      
+      # Get best split
+      splitErrs <- lapply(splitCur,'[[',3) %>% unlist()
+      bestSplit <- splitCur[which(splitErrs==min(splitErrs))][[1]]
+      
+      checkVec <- c(bestSplit$split1,bestSplit$split2)
+      if(length(checkVec)!=2){
+        tryCatch(updateLog(paste("Unable to identify sector for Scan ",unique(tmp$AbsoluteScan),' Sector ',sector,sep='')),
+                 error=function(e)return())
+        return(NULL)
+      }
+      
+      # Get splits in terms of radius
+      split1data <- sectorData[max(bestSplit$split1),]
+      split1 <- split1data$r
+      split2 <- sectorData[max(bestSplit$split2),]$r
+      
+      # plot
+      sectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
+        geom_point()+
+        geom_vline(xintercept=split1,col='blue')+
+        geom_vline(xintercept=split2,col='blue')+
+        ylab("Ar")+
+        xlab("r")+
+        theme_prism()
+      
+      # Subset out data for identified miniscus
+      miniscusData <- subset(sectorData,r>split1&r<split2)
+      
+      # Format as range
+      rangeFormatList <- createSector(absoluteScanNumber,miniscusData)
+      rangeFormat <- rangeFormatList$sector
+      sectorID <- rangeFormatList$id
+      
+      # Create hook for editing 
+      generateSectorHooks(rangeFormat)
+      
+      return(rangeFormat)
+      
+      
+    }) %>% bind_rows()
+    
+    tryCatch(updateLog(paste("Sector finding complete for scan ",scanNumber,sep="")),error=function(e)return())
+    
+    # Return ranges
+    return(autoRanges)
+    
+  }
+  
   # Render selection of scan
-  renderScanSelection <- function(){
+  renderScanSelection <- function(selectedScan=NULL){
+    
+    if(length(selectedScan)==0){
+      defaultSelection <- dataList$absoluteScanNumbers[1]
+    } else{
+      defaultSelection <- selectedScan
+    }
     
     output$scanSelectionInput <- renderUI({
-      selectInput('selectScan',NULL,choices=dataList$scansToAnalyze,selected=dataList$scansToAnalyze[1],multiple=FALSE,width=300)
+      selectInput('selectScan',NULL,choices=dataList$absoluteScanNumbers,selected=defaultSelection,multiple=FALSE,width=300)
     })
     
   }
@@ -687,7 +749,8 @@ function(input, output, session) {
       return()
     }
     
-    currentScanData <- dataList$scanData[[dataList$selectedScan]]
+    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
+    currentScanData <- dataList$scanData[[scanInd]]
     
     if(length(currentScanData)==0){
       return()
@@ -748,34 +811,29 @@ function(input, output, session) {
   observeEvent(input$selectScan,{
     
     selectedScan <- as.numeric(input$selectScan)
+    renderPlot <- ifelse(length(dataList$skipPlotRerender)>0,dataList$skipPlotRerender,FALSE)
     
-    if(!is.na(selectedScan)){
+    if(!is.na(selectedScan)&&!renderPlot){
       # Update data list
       updateDataList('selectedScan',selectedScan)
       # Plot
+      resetBrush()
       renderScanPlot()
+    } else{
+      updateDataList('skipPlotRerender',FALSE)
     }
     
   })
   
-  # When user brushes an area on the plot (selects a sector)
-  observeEvent(input$selectingSector,{
+  # Render plots from selected sector
+  renderSelectedSectorPlots <- function(currentScanData,selectedSector){
     
-    currentScanData <- dataList$scanData[[dataList$selectedScan]]
-    selectedSector <- input$selectingSector
-    
-    # If selectedSector is alreayd equal to the selected sector, then return instead of running 2x
-    if(length(dataList$selectedSector)>0){
-      if(selectedSector$xmax==dataList$selectedSector$xmax&&selectedSector$xmin==dataList$selectedSector$xmin){
-        return()
-      }
-    }
-    
-    # Update datalist
-    updateDataList('selectedSector',selectedSector)
-
     # Get sector data from scan data
     sectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
+    
+    if(nrow(sectorData)==0){
+      return()
+    }
     
     # Get linear fit
     linearFit <- tryCatch(lm(Ar~r,data=sectorData),error=function(e)return(NA))
@@ -794,6 +852,9 @@ function(input, output, session) {
       Max = max(sectorData$r),
       n = nrow(sectorData)
     )
+    if(nrow(tmpData)==0){
+      return()
+    }
     
     # Prevents rendering of plots and ui if selected range is the same as what is already displayed
     checkForSector <- tryCatch(print(currentSectorDf),error=function(e)return(NA))
@@ -810,6 +871,9 @@ function(input, output, session) {
       Max = max(sectorData$r),
       n = nrow(sectorData)
     )
+    if(nrow(currentSectorDf)==0){
+      return()
+    }
     
     # Format sector label
     sectorLabel <- paste(currentSectorDf$Min," - ",currentSectorDf$Max,
@@ -841,7 +905,7 @@ function(input, output, session) {
       theme_prism()+
       theme(axis.text = element_text(size=10),
             axis.title = element_text(size=11)
-            )
+      )
     
     # combine plots
     bothPlots <- plot_grid(currentSectorPlot,residualPlot,
@@ -850,21 +914,54 @@ function(input, output, session) {
     # Update scan plot to zoom
     renderScanPlot(selectedSector,sectorLabel,bothPlots)
     
+  }
+  
+  # When user brushes an area on the plot (selects a sector)
+  observeEvent(input$selectingSector,{
+    
+    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
+    currentScanData <- dataList$scanData[[scanInd]]
+    selectedSector <- input$selectingSector
+    
+    # If selectedSector is alreayd equal to the selected sector, then return instead of running 2x
+    if(length(dataList$selectedSector)>0){
+      if(selectedSector$xmax==dataList$selectedSector$xmax&&selectedSector$xmin==dataList$selectedSector$xmin){
+        return()
+      }
+    }
+    
+    # Update datalist
+    updateDataList('selectedSector',selectedSector)
+    
+    # Update plots
+    renderSelectedSectorPlots(currentScanData,selectedSector)
+    
+    # Stop skipping rerender
+    updateDataList('skipPlotRerender',FALSE)
+    
   })
+  
+  # Function to reset brush
+  resetBrush <- function(){
+    session$resetBrush('selectingSector')
+    output$sectorPlotFrame <- NULL
+  }
   
   # When a user clicks the plot, reset to normal view
   observeEvent(input$resetPlotView,{
+    resetBrush()
     renderScanPlot()
   })
   
-  # When user saves a selection
+  # When user saves a sector
   observeEvent(input$saveSector,{
     
     # Get receptor concentration
     receptorConcentration <- tryCatch(ifelse(input$receptorInput=="",0,input$receptorInput),error=function(e)return(0))
     
     # Get scan data
-    currentScanData <- dataList$scanData[[dataList$selectedScan]]
+    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
+    currentScanData <- dataList$scanData[[scanInd]]
     
     # Get sector data
     selectedSector <- dataList$selectedSector
@@ -873,16 +970,9 @@ function(input, output, session) {
     currentSectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
     
     # Get current sector df
-    currentSectorDf <- data.frame(
-      Scan=dataList$selectedScan,
-      Min=min(currentSectorData$r),
-      Max=max(currentSectorData$r),
-      n=nrow(currentSectorData)
-    )
-    currentSectorDf$Receptor <- receptorConcentration
-    
-    # Define sector ID
-    sectorID <- getRandomCharacter()
+    currentSectorList <- createSector(dataList$selectedScan,currentSectorData,receptor=receptorConcentration)
+    currentSectorDf <- currentSectorList$sector
+    sectorID <- currentSectorList$id
     
     # Get saved sectors
     savedSectors <- dataList$savedSectors
@@ -906,15 +996,13 @@ function(input, output, session) {
       updateDataList('savedSectors',savedSectors)
       
       # Create hook for editing 
-      observeEvent(eval(parse(text=paste('input$',sectorID,sep=""))),{
-        editSelectedSector(sectorID)
-      })
+      generateSectorHooks(currentSectorDf)
       
       # Update UI
       renderSavedSelections()
       
       # Update plot
-      session$resetBrush('selectingSector')
+      resetBrush()
       renderScanPlot()
     }
     
@@ -937,6 +1025,7 @@ function(input, output, session) {
           
           tmpSector <- dataList$savedSectors[[x]]
           sectorID <- tmpSector$ID
+          rangeID <- tmpSector$RangeID
           colorString <- paste(as.numeric(col2rgb(tmpSector$Color)[,1]),collapse=',')
           
           div(
@@ -949,7 +1038,9 @@ function(input, output, session) {
             div(
               class='column',style='align-items:center;width:45%',
               p(HTML("<b>Range</b>"),style='font-size:12px;'),
-              p(paste(tmpSector$Min,' - ',tmpSector$Max,sep=""),style='font-size:10px;')
+              actionButton(rangeID,
+                           paste(tmpSector$Min,' - ',tmpSector$Max,sep=""),
+                           style='font-size:10px;padding:0px;background-color:transparent;border:0px;color:black;font-weight:normal;text-decoration:underline')
             ),
             div(
               class='column',style='align-items:center;width:15%',
@@ -966,7 +1057,7 @@ function(input, output, session) {
     })
   }
   
-  # Define function to edit a sector
+  # Define function to remove a sector
   editSelectedSector <- function(sectorID){
 
     savedSectors <- dataList$savedSectors
@@ -985,6 +1076,41 @@ function(input, output, session) {
     #Update UI
     renderSavedSelections()
     renderScanPlot()
+  }
+  
+  # DEfine function to zoom to a sector
+  zoomToSector <- function(sectorID){
+    
+    savedSectors <- dataList$savedSectors
+    
+    ids <- lapply(savedSectors,'[[',6) %>% unlist()
+    idToZoom <- which(ids==sectorID)[1]
+    
+    sectorToZoom <- savedSectors[[idToZoom]]
+    
+    sectorList <-list()
+    sectorList$xmin <- sectorToZoom$Min
+    sectorList$xmax <- sectorToZoom$Max
+    
+    # Switch scan data
+    if(sectorToZoom$Scan!=dataList$selectedScan){
+      updateDataList('skipPlotRerender',TRUE)
+      renderScanSelection(sectorToZoom$Scan)
+    }
+    
+    updateDataList('selectedSector',sectorList)
+    updateDataList('selectedScan',sectorToZoom$Scan)
+    
+    # Render plot
+    resetBrush()
+
+    # Get current scan data
+    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
+    currentScanData <- dataList$scanData[[scanInd]]
+    
+    # Render sector plots
+    renderSelectedSectorPlots(currentScanData,sectorList)
+    
   }
   
   # For auto sector finding
@@ -1023,7 +1149,7 @@ function(input, output, session) {
     renderSavedSelections()
     
     # Update plot
-    session$resetBrush('selectingSector')
+    resetBrush()
     renderScanPlot()
     
     progress$close()
@@ -1116,7 +1242,8 @@ function(input, output, session) {
       sector <- savedSectors[[x]]
       
       # Get data from scan
-      sectorScan <- dataList$scanData[[as.numeric(sector$Scan)]]
+      scanInd <- which(dataList$absoluteScanNumbers==as.numeric(sector$Scan))
+      sectorScan <- dataList$scanData[[scanInd]]
       
       # Subset out sector
       data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
@@ -1226,8 +1353,7 @@ function(input, output, session) {
         nonlinear,
         linear,
         ncol=2,
-        nrow=1,
-        align='h'
+        nrow=1
       )
       
       parmRow <- div(
@@ -1296,26 +1422,6 @@ function(input, output, session) {
         geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
         theme_prism()
       
-      # Predict if monomer
-      monomerData <- singleIdealSpecies(r=baselineFits$r,
-                            w=baselineFits$w,
-                            R=baselineFits$R,
-                            temp=baselineFits$temp,
-                            r0=baselineFits$r0,
-                            A0=baselineFits$A0,
-                            Mb=baselineFits$Mb,
-                            offset=baselineFits$offset)
-      dimerData <- singleIdealSpecies(r=baselineFits$r,
-                          w=baselineFits$w,
-                          R=baselineFits$R,
-                          temp=baselineFits$temp,
-                          r0=baselineFits$r0,
-                          A0=baselineFits$A0,
-                          Mb=(baselineFits$Mb*2),
-                          offset=baselineFits$offset)
-      baselineFits$monomerSimulation <- monomerData
-      baselineFits$dimerSimulation <- dimerData
-      
       # Plot linear
       lineardf <- data.frame(
         y = log((baselineFits$Ar-baselineFits$offset)/baselineFits$A0),
@@ -1323,6 +1429,26 @@ function(input, output, session) {
       )
       linearFit <- lm(y~x,data=lineardf)
       baselineFits$linearpAr <- predict(linearFit,lineardf)
+      
+      # Predict if monomer
+      monomerData <- singleIdealSpecies(r=baselineFits$r,
+                                        w=baselineFits$w,
+                                        R=baselineFits$R,
+                                        temp=baselineFits$temp,
+                                        r0=baselineFits$r0,
+                                        A0=baselineFits$A0,
+                                        Mb=baselineFits$Mb,
+                                        offset=baselineFits$offset)
+      dimerData <- singleIdealSpecies(r=baselineFits$r,
+                                      w=baselineFits$w,
+                                      R=baselineFits$R,
+                                      temp=baselineFits$temp,
+                                      r0=baselineFits$r0,
+                                      A0=baselineFits$A0,
+                                      Mb=(baselineFits$Mb*2),
+                                      offset=baselineFits$offset)
+      baselineFits$monomerSimulation <- monomerData
+      baselineFits$dimerSimulation <- dimerData
       
       linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
         geom_point(aes(y=log((Ar-offset)/A0)))+
@@ -1344,8 +1470,7 @@ function(input, output, session) {
         nonlinear,
         linear,
         ncol=2,
-        nrow=1,
-        align='h'
+        nrow=1
       )
       
       parmRow <- div(
