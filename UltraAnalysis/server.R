@@ -161,7 +161,7 @@
 
 # Define model types
 .GlobalEnv$modelTypes <- c("MW / Single ideal species",
-                           "Kd / A + A <-> AB")
+                           "Kd / A + A <-> AA")
 psv <- 0.71
 sd <- 1.003
 
@@ -614,72 +614,89 @@ function(input, output, session) {
       
       sectorData <- subset(tmp,Sector==sector)
       
-      # Calculate residuals to mean
-      residualsToMean <- abs(sectorData$Dr-mean(sectorData$meanDr))
-      sectorData$residuals <- residualsToMean
+      # Split data into groups of 10 datapoints
+      n <- ceiling(nrow(sectorData)*0.25)
+      errList <- lapply(1:(nrow(sectorData)-n),function(y){
+        
+        sub <- sectorData[y:(y+n),]
+        
+        # # Do temporary baseline fit for single ideal species
+        # sub$r0 <- sub$r[1]
+        # tempFit <- tryCatch(
+        #   gsl_nls(
+        #     Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
+        #     data=sub,
+        #     algorithm='lm',
+        #     start=c(A0=1,Mb=1,offset=1),
+        #     lower=c(A0=0,Mb=0,offset=NULL)
+        #   ),
+        #   warning=function(w)return(NA)
+        # )
+        # 
+        # if(length(tempFit)==1){
+        #   return()
+        # }
+        
+        # Format for lm.fit
+        X <- cbind(1, as.matrix(sub$r))
+        yvals <- sub$Ar
+
+        # Get linear fit for group 3
+        subFit <- .lm.fit(X,yvals)
+
+        # # Get predictions
+        # preds <- predict(tempFit,data.frame(r=sub$r,w=sub$w,R=sub$R,temp=sub$temp,r0=sub$r0))
+        # 
+        # Get proxy for normality of residuals as mean over median
+        fitResiduals <- (subFit$residuals)
+        
+        # Get if normally distributed
+        normalTest <- shapiro.test(fitResiduals)
+        
+        # Calcualte rsqr
+        meanErr <- sum((sub$Ar-mean(sub$Ar))^2)
+        pErr <- sum((fitResiduals^2))
+        rsqr <- 1-(pErr/meanErr)
+        
+        # Calculate metric weighting distance to 1 by GoF
+        outMetrics <-  (1-rsqr) * (1-normalTest$statistic[[1]])
+        
+        # Save output in list
+        outlist <- list()
+        outlist$data <- sub
+        outlist$metrics <- outMetrics
+        outlist$rsqr <- rsqr
+        outlist$W <- normalTest$statistic[[1]]
+        outlist$coef <- subFit$coefficients
+        
+        return(outlist)
+        
+      }) 
+      errs <- unlist(lapply(errList,'[[','metrics'))
       
-      # Identify regions of consistency among residuals vector
-      splitList <- vector('list',length(residualsToMean))
-      for(y in 2:(length(residualsToMean)-2)){
-        
-        # Get groups
-        group1 <- residualsToMean[1:(y-1)]
-        group2 <- residualsToMean[y:length(residualsToMean)]
-        
-        # Label vector
-        sdList <- lapply(10:length(group2),function(z){
-          # Get other groups
-          group3 <- group2[1:(z-1)]
-          group4 <- group2[z:length(group2)]
-          
-          # Get sd of group 3 (this is what we want to minimize)
-          group3SD <- sd(group3)/length(group3)
-          return(group3SD)
-        }) %>% unlist()
-        
-        # Get best split
-        bestSplitIndex <- which(sdList==min(sdList,na.rm=TRUE))
-        bestSplitValue <- group2[bestSplitIndex]
-        trueIndex <- which(residualsToMean==bestSplitValue)
-        
-        splitList[[y]]$split1 <- y
-        splitList[[y]]$split2 <- trueIndex
-        splitList[[y]]$error <- sdList[bestSplitIndex]
+      # Get which minimizes err
+      minInd <- which(errs==min(errs))[1]
+      
+      # Get best set of data
+      bestData <- errList[[minInd]]
+      
+      # Plot
+      bestFit <- function(x,slope,intercept){
+        y <- x*slope+intercept
+        return(r)
       }
+
+      meniscusData <- bestData$data
       
-      # Curate
-      splitCur <- splitList[!unlist(lapply(splitList,is.null))]
-      
-      # Get best split
-      splitErrs <- lapply(splitCur,'[[',3) %>% unlist()
-      bestSplit <- splitCur[which(splitErrs==min(splitErrs))][[1]]
-      
-      checkVec <- c(bestSplit$split1,bestSplit$split2)
-      if(length(checkVec)!=2){
-        tryCatch(updateLog(paste("Unable to identify sector for Scan ",unique(tmp$AbsoluteScan),' Sector ',sector,sep='')),
-                 error=function(e)return())
-        return(NULL)
-      }
-      
-      # Get splits in terms of radius
-      split1data <- sectorData[max(bestSplit$split1),]
-      split1 <- split1data$r
-      split2 <- sectorData[max(bestSplit$split2),]$r
-      
-      # plot
-      sectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
+      plotForBugfixing <- ggplot(meniscusData,
+             aes(x=r,y=Ar))+
         geom_point()+
-        geom_vline(xintercept=split1,col='blue')+
-        geom_vline(xintercept=split2,col='blue')+
-        ylab("Ar")+
-        xlab("r")+
+        geom_abline(slope=bestData$coef[[2]],intercept=bestData$coef[[1]],col='red')+
         theme_prism()
       
-      # Subset out data for identified miniscus
-      miniscusData <- subset(sectorData,r>split1&r<split2)
       
       # Format as range
-      rangeFormatList <- createSector(absoluteScanNumber,miniscusData)
+      rangeFormatList <- createSector(absoluteScanNumber,meniscusData)
       rangeFormat <- rangeFormatList$sector
       sectorID <- rangeFormatList$id
       
@@ -1178,7 +1195,7 @@ function(input, output, session) {
         div(class='column',
           actionButton('fitData','🏃 Run fit',style='align-self:center')
         )
-      } else if(selectedModel=='Kd / A + A <-> AB'){
+      } else if(selectedModel=='Kd / A + A <-> AA'){
         div(class='column',
             textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
             textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
@@ -1316,7 +1333,7 @@ function(input, output, session) {
       
       # Convert Mb to MW
       mw <- (Mb$Estimate/(1-(psv*sd)))/1000
-      mwErr <- (Mb$`Std. Error`/(1-(psv*sd)))/1000
+      mwErr <- (Mb$`Std. Error`/Mb$Estimate)*mw
       
       # predict
       preds <- predict(mwFit,baselineFits)
@@ -1364,7 +1381,7 @@ function(input, output, session) {
       )
    
       
-    } else if(dataList$selectedModel=='Kd / A + A <-> AB'){
+    } else if(dataList$selectedModel=='Kd / A + A <-> AA'){
       
       # Get fit-specific inputs
       mwValue <- as.numeric(input$mwInput)
@@ -1382,7 +1399,7 @@ function(input, output, session) {
       }
       
       # Calculate buoyant MW
-      mbValue <- mwValue*(1-(psv*sd))
+      mbValue <- dataList$mwValue*(1-(dataList$psv*dataList$sd))
       baselineFits$Mb <- mbValue
 
       # Fit for Ka
@@ -1404,8 +1421,10 @@ function(input, output, session) {
       kaCoef <- kaFitSummary$coefs[which(rownames(kaFitSummary$coefs)=="KaA"),]
       
       # Convert KaA to Kd
-      Kd <- ((eCoefValue*2)/((eCoefValue^2)*kaCoef$Estimate))*1000000
-      KdErr <- ((eCoefValue*2)/((eCoefValue^2)*kaCoef$`Std. Error`))*1000000
+      Kd <- ((1/kaCoef$Estimate)*(2/dataList$eCoefValue))*1000000
+      
+      # For z = Ecoef/2 * Ka^-1 = c * x^a, dz/z = |a| * dx/x
+      KdErr <- 1 * (kaCoef$`Std. Error`/kaCoef$Estimate) * Kd
       
       # predict
       preds <- predict(kaFit,baselineFits)
