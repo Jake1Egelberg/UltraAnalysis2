@@ -1,7 +1,13 @@
 
 # Define fitting function
 .GlobalEnv$singleIdealSpecies <- function(r, w, R, temp, r0, A0, Mb, offset){
-  Ar <- offset + A0 * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) )
+  Ar <- offset + A0 * exp(1)^( ( (Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
+  return(Ar)
+}
+.GlobalEnv$AAtoA2 <- function(r, w, R, temp, r0, A0, Mb, KaA, offset){
+  monomerTerm <- A0 * exp(1)^( ( (Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
+  dimerTerm <- KaA * A0^2 * exp(1)^( ( (2*Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
+  Ar <- offset + monomerTerm + dimerTerm
   return(Ar)
 }
 
@@ -139,27 +145,12 @@
   
 }
 
-# Read test data 
-testFiles <- list.files('www/testData/',full.names=TRUE)
-.GlobalEnv$testData <- lapply(testFiles,readScans)
-
-# Plot
-bothPlots <- ggplot(testData[[1]][[1]],aes(x=r,y=Ar))+
-  geom_point()+
-  theme_prism()+
-  theme(
-    axis.text.x = element_blank(),
-    axis.title.x = element_blank(),
-    axis.line.x = element_blank(),
-    axis.ticks.x = element_blank()
-  )
-sectorLabel <- "testing"
-
 # Define colros to use
 .GlobalEnv$colorVec <- rainbow(10)
 
 # Define model types
-.GlobalEnv$modelTypes <- c("MW / Single ideal species")
+.GlobalEnv$modelTypes <- c("MW / Single ideal species",
+                           "Kd / A + A <-> AB")
 psv <- 0.71
 sd <- 1.003
 
@@ -1055,16 +1046,24 @@ function(input, output, session) {
     selectedModel <- input$modelType
     updateDataList('selectedModel',selectedModel)
     
-  
     output$modelParms <- renderUI({
       
       if(selectedModel=='MW / Single ideal species'){
-        
         div(class='column',
           actionButton('fitData','🏃 Run fit',style='align-self:center')
         )
+      } else if(selectedModel=='Kd / A + A <-> AB'){
+        div(class='column',
+            textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
+            textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
+            actionButton('fitData','🏃 Run fit',style='align-self:center')
+          )
       }
-
+      
+    })
+    
+    output$fitDescription <- renderText({
+      paste("Global fit for: ",dataList$selectedModel,sep="")
     })
     
   })
@@ -1123,7 +1122,7 @@ function(input, output, session) {
       data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
       
       # Define r0 reference radius
-      r0 <- median(data$r)
+      r0 <- data$r[1]
       data$r0 <- r0
       
       # Fit baseline and reference absorbance
@@ -1204,20 +1203,23 @@ function(input, output, session) {
       # Plot non linear fit
       nonlinear <- ggplot(baselineFits,aes(x=r))+
         geom_point(aes(y=Ar-offset))+
-        geom_line(aes(y=pAr-offset,group=ID),col='red')+
+        geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
         theme_prism()
       
       # Plot linear
+      lineardf <- data.frame(
+        y = log((baselineFits$Ar-baselineFits$offset)/baselineFits$A0),
+        x = ((baselineFits$r^2-baselineFits$r0^2)/2)
+      )
+      linearFit <- lm(y~x,data=lineardf)
+      baselineFits$linearpAr <- predict(linearFit,lineardf)
+      
       linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
         geom_point(aes(y=log((Ar-offset)/A0)))+
-        geom_line(aes(y=log((pAr-offset)/A0),group=ID),col='red')+
+        geom_line(aes(x=((r^2-r0^2)/2),y=linearpAr),col='red',lwd=1)+
         xlab("(r^2 - r0^2) / 2")+
         ylab("ln( (Ar - offset) / A0 )")+
         theme_prism()
-      
-      # Format plot title
-      plotTitle <- paste("MW = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",
-                         "\n Buoyant MW = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa, R^2 = ",round(rsqr,3),sep="")
       
       # Format grid
       plotgrid <- plot_grid(
@@ -1227,7 +1229,132 @@ function(input, output, session) {
         nrow=1,
         align='h'
       )
+      
+      parmRow <- div(
+        class='column',
+        p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
+        p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
+        p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
+      )
    
+      
+    } else if(dataList$selectedModel=='Kd / A + A <-> AB'){
+      
+      # Get fit-specific inputs
+      mwValue <- as.numeric(input$mwInput)
+      eCoefValue <- as.numeric(input$eCoefInput)
+      
+      # Update datalist
+      updateDataList('mwValue',mwValue)
+      updateDataList('eCoefValue',eCoefValue)
+      
+      # Check vec
+      checkVec <- c(dataList$mwValue,dataList$eCoefValue)
+      if(length(checkVec)==0||sum(is.na(checkVec))>0){
+        updateLog('Invalid MW or Extinction Coefficient inputs. Unable to fit.')
+        return()
+      }
+      
+      # Calculate buoyant MW
+      mbValue <- mwValue*(1-(psv*sd))
+      baselineFits$Mb <- mbValue
+
+      # Fit for Ka
+      kaFit <-  gsl_nls(
+        Ar~AAtoA2(r,w,R,temp,r0,A0,Mb,KaA,offset),
+        data=baselineFits,
+        algorithm='lm',
+        start=c(KaA=1),
+        lower=c(KaA=0.000001)
+      )
+      
+      # Extract Ka
+      kaFitSummary <-  summarizeNLS(kaFit,dataList$selectedModel)
+      
+      # Update log
+      tryCatch(updateLog(kaFitSummary$summary),error=function(e){return()})
+      
+      # Get coef
+      kaCoef <- kaFitSummary$coefs[which(rownames(kaFitSummary$coefs)=="KaA"),]
+      
+      # Convert KaA to Kd
+      Kd <- ((eCoefValue*2)/((eCoefValue^2)*kaCoef$Estimate))*1000000
+      KdErr <- ((eCoefValue*2)/((eCoefValue^2)*kaCoef$`Std. Error`))*1000000
+      
+      # predict
+      preds <- predict(kaFit,baselineFits)
+      baselineFits$pAr <- preds
+      
+      # Calculate rsqr
+      meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
+      pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
+      rsqr <- 1-(pErr/meanErr)
+      
+      # Plot non linear fit
+      nonlinear <- ggplot(baselineFits,aes(x=r))+
+        geom_point(aes(y=Ar-offset))+
+        geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
+        theme_prism()
+      
+      # Predict if monomer
+      monomerData <- singleIdealSpecies(r=baselineFits$r,
+                            w=baselineFits$w,
+                            R=baselineFits$R,
+                            temp=baselineFits$temp,
+                            r0=baselineFits$r0,
+                            A0=baselineFits$A0,
+                            Mb=baselineFits$Mb,
+                            offset=baselineFits$offset)
+      dimerData <- singleIdealSpecies(r=baselineFits$r,
+                          w=baselineFits$w,
+                          R=baselineFits$R,
+                          temp=baselineFits$temp,
+                          r0=baselineFits$r0,
+                          A0=baselineFits$A0,
+                          Mb=(baselineFits$Mb*2),
+                          offset=baselineFits$offset)
+      baselineFits$monomerSimulation <- monomerData
+      baselineFits$dimerSimulation <- dimerData
+      
+      # Plot linear
+      lineardf <- data.frame(
+        y = log((baselineFits$Ar-baselineFits$offset)/baselineFits$A0),
+        x = ((baselineFits$r^2-baselineFits$r0^2)/2)
+      )
+      linearFit <- lm(y~x,data=lineardf)
+      baselineFits$linearpAr <- predict(linearFit,lineardf)
+      
+      linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
+        geom_point(aes(y=log((Ar-offset)/A0)))+
+        geom_line(aes(y=log((monomerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
+        geom_line(aes(y=log((dimerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
+        geom_line(aes(x=((r^2-r0^2)/2),y=linearpAr),col='red',lwd=1)+
+        scale_color_manual(
+          values=c(
+            "Simulated Dimer / Monomer"='gray50'
+          )
+        )+
+        xlab("(r^2 - r0^2) / 2")+
+        ylab("ln( (Ar - offset) / A0 )")+
+        theme_prism()+
+        theme(legend.position='top')
+      
+      # Format grid
+      plotgrid <- plot_grid(
+        nonlinear,
+        linear,
+        ncol=2,
+        nrow=1,
+        align='h'
+      )
+      
+      parmRow <- div(
+        class='column',
+        p(HTML(paste("<b>Kd</b> = ",round(Kd,2)," +/- ",round(KdErr,2)," uM",sep="")),class='body'),
+        p(HTML(paste("<b>KaA</b> = ",round(kaCoef$Estimate,3)," +/- ",round(kaCoef$`Std. Error`,3),sep="")),class='body'),
+        p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
+      )
+      plotgrid <- plotgrid
       
     }
     
@@ -1267,12 +1394,7 @@ function(input, output, session) {
         div(
           class='column',style='width:fit-contents;margin-left:30px',
           div(class='row',
-            div(
-              class='column',
-              p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
-              p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
-              p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
-            )
+            parmRow
           ),
           div(
             class='row',style='margin-top:15px;align-self:flex-end',

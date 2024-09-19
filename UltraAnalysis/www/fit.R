@@ -12,7 +12,7 @@ div(
   ), # divider column
   div(
     class='column',style='padding:10px;',
-    p(paste("Global fit for: ",dataList$selectedModel,sep=""),class='header'),
+    textOutput('fitDescription')%>%tagAppendAttributes(class = 'header'),
     uiOutput('fitResult')
   ), #column 2
   
