@@ -339,6 +339,8 @@ function(input, output, session) {
     scanPlot <- ggplot(currentScan,aes(x=r,y=Ar))+
       geom_line()+
       xlab("r (cm)")+
+      geom_hline(yintercept=1,col='gray50',lty='dashed')+
+      geom_hline(yintercept=0,col='gray50',lty='dashed')+
       theme_prism()
     
     absoluteScanNumber <- unique(currentScan$AbsoluteScan)
@@ -612,37 +614,33 @@ function(input, output, session) {
     # Get sectors
     autoRanges <- lapply(1:sectorNum,function(sector){
       
-      sectorData <- subset(tmp,Sector==sector)
+      rawSectorData <- subset(tmp,Sector==sector)
       
+      # Transform sector data to be linear
+      sectorData <- data.frame(
+        x = (rawSectorData$r^2),
+        y = suppressWarnings(log(rawSectorData$Ar))
+      )
+    
       # Split data into groups of 10 datapoints
       n <- ceiling(nrow(sectorData)*0.25)
       errList <- lapply(1:(nrow(sectorData)-n),function(y){
         
+        rawSub <- rawSectorData[y:(y+n),]
         sub <- sectorData[y:(y+n),]
         
-        # # Do temporary baseline fit for single ideal species
-        # sub$r0 <- sub$r[1]
-        # tempFit <- tryCatch(
-        #   gsl_nls(
-        #     Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
-        #     data=sub,
-        #     algorithm='lm',
-        #     start=c(A0=1,Mb=1,offset=1),
-        #     lower=c(A0=0,Mb=0,offset=NULL)
-        #   ),
-        #   warning=function(w)return(NA)
-        # )
-        # 
-        # if(length(tempFit)==1){
-        #   return()
-        # }
+        # Skip fits for data with NA
+        if(length(which(is.na(sub$y)))>0){
+          out <- list()
+          out$metrics <- NA
+          return(out)
+        }
         
         # Format for lm.fit
-        X <- cbind(1, as.matrix(sub$r))
-        yvals <- sub$Ar
+        X <- cbind(1, as.matrix(sub$x))
 
         # Get linear fit for group 3
-        subFit <- .lm.fit(X,yvals)
+        subFit <- .lm.fit(X,sub$y)
 
         # # Get predictions
         # preds <- predict(tempFit,data.frame(r=sub$r,w=sub$w,R=sub$R,temp=sub$temp,r0=sub$r0))
@@ -654,7 +652,7 @@ function(input, output, session) {
         normalTest <- shapiro.test(fitResiduals)
         
         # Calcualte rsqr
-        meanErr <- sum((sub$Ar-mean(sub$Ar))^2)
+        meanErr <- sum((sub$y-mean(sub$y,na.rm=TRUE))^2)
         pErr <- sum((fitResiduals^2))
         rsqr <- 1-(pErr/meanErr)
         
@@ -663,7 +661,7 @@ function(input, output, session) {
         
         # Save output in list
         outlist <- list()
-        outlist$data <- sub
+        outlist$data <- rawSub
         outlist$metrics <- outMetrics
         outlist$rsqr <- rsqr
         outlist$W <- normalTest$statistic[[1]]
@@ -675,7 +673,7 @@ function(input, output, session) {
       errs <- unlist(lapply(errList,'[[','metrics'))
       
       # Get which minimizes err
-      minInd <- which(errs==min(errs))[1]
+      minInd <- which(errs==min(errs,na.rm=TRUE))[1]
       
       # Get best set of data
       bestData <- errList[[minInd]]
@@ -685,15 +683,12 @@ function(input, output, session) {
         y <- x*slope+intercept
         return(r)
       }
-
       meniscusData <- bestData$data
-      
       plotForBugfixing <- ggplot(meniscusData,
-             aes(x=r,y=Ar))+
+             aes(x=r^2,y=log(Ar)))+
         geom_point()+
         geom_abline(slope=bestData$coef[[2]],intercept=bestData$coef[[1]],col='red')+
         theme_prism()
-      
       
       # Format as range
       rangeFormatList <- createSector(absoluteScanNumber,meniscusData)
@@ -785,6 +780,8 @@ function(input, output, session) {
  
     currentScanPlot <- ggplot(scanDataToPlot,aes(x=r,y=Ar))+
       geom_point()+
+      geom_hline(yintercept=0,col='gray50',lty='dashed')+
+      geom_hline(yintercept=1,col='gray50',lty='dashed')+
       theme_prism()
     
     # Check which selections are in the current scan
@@ -852,15 +849,21 @@ function(input, output, session) {
       return()
     }
     
+    # Transform
+    transformed <- data.frame(
+      x = sectorData$r^2,
+      y = log(sectorData$Ar)
+    )
+    
     # Get linear fit
-    linearFit <- tryCatch(lm(Ar~r,data=sectorData),error=function(e)return(NA))
+    linearFit <- tryCatch(lm(y~x,data=transformed),error=function(e)return(NA))
     linearFitSummary <- tryCatch(summary(linearFit),error=function(e)return(NA))
     rsqr <- tryCatch(linearFitSummary$r.squared,error=function(e)return(NA))
     coefs <- tryCatch(coef(linearFitSummary),error=function(e)return(c(0,0)))
     
     # Predict from fit
-    preds <- tryCatch(predict(linearFit,sectorData),error=function(e)return(NA))
-    sectorData$pAr <- preds
+    preds <- tryCatch(predict(linearFit,transformed),error=function(e)return(NA))
+    transformed$pAr <- preds
     
     # Generate df to match with currently selected area
     tmpData <- data.frame(
@@ -899,10 +902,12 @@ function(input, output, session) {
     
     
     # Plot
-    currentSectorPlot <- ggplot(sectorData,aes(x=r,y=Ar))+
+    currentSectorPlot <- ggplot(transformed,aes(x=x,y=y))+
       geom_point(size=1)+
       geom_abline(slope=coefs[2],intercept=coefs[1],col='red')+
       scale_y_continuous(n.breaks=3)+
+      ylab("ln(Ar)")+
+      xlab("r^2")+
       theme_prism()+
       theme(
         axis.text.x = element_blank(),
@@ -914,11 +919,12 @@ function(input, output, session) {
       )
     
     # Plot residuals
-    residualPlot <- ggplot(sectorData,aes(x=r,y=Ar-pAr))+
+    residualPlot <- ggplot(transformed,aes(x=x,y=y-pAr))+
       geom_point(size=1)+
       geom_hline(yintercept=0,col='gray20')+
       scale_y_continuous(n.breaks=3)+
-      ylab("Ar - pAr")+
+      ylab("y - ŷ")+
+      xlab('r^2')+
       theme_prism()+
       theme(axis.text = element_text(size=10),
             axis.title = element_text(size=11)
