@@ -223,7 +223,6 @@ function(input, output, session) {
     
   }
   
-  
   # Load upload tab
   output$upload <- renderUI({
     source('www/upload.R')[[1]]
@@ -320,14 +319,6 @@ function(input, output, session) {
       # Get absolute scan numbers for scans to analyze
       absoluteScanNumbers <- lapply(dataList$scanData[dataList$scansToAnalyze],'[[','AbsoluteScan')%>%unlist()%>%unique()
       updateDataList('absoluteScanNumbers',absoluteScanNumbers)
-      
-      # Update saved sectors
-      if(length(dataList$savedSectors)>0){
-        sectorScans <- lapply(dataList$savedSectors,'[[',1)%>%unlist()
-        savedSectorsToInclude <- which(sectorScans%in%scansToAnalyze)
-        newSectors <- dataList$savedSectors[savedSectorsToInclude]
-        updateDataList('savedSectors',newSectors)
-      }
       
     })
     
@@ -483,7 +474,7 @@ function(input, output, session) {
           # Create hook for editing 
           generateSectorHooks(x)
         })
-        
+      
         # Render UIs
         defaultScansToAnalyze <- dataList$scansToAnalyze
         
@@ -717,6 +708,14 @@ function(input, output, session) {
       defaultSelection <- dataList$absoluteScanNumbers[1]
     } else{
       defaultSelection <- selectedScan
+    }
+    
+    # Update saved sectors when changing which scans are included
+    if(length(dataList$savedSectors)>0){
+      sectorScans <- lapply(dataList$savedSectors,'[[',1)%>%unlist()
+      savedSectorsToInclude <- which(sectorScans%in%dataList$absoluteScanNumbers)
+      newSectors <- dataList$savedSectors[savedSectorsToInclude]
+      updateDataList('savedSectors',newSectors)
     }
     
     output$scanSelectionInput <- renderUI({
@@ -1101,7 +1100,7 @@ function(input, output, session) {
     renderScanPlot()
   }
   
-  # DEfine function to zoom to a sector
+  # Define function to zoom to a sector
   zoomToSector <- function(sectorID){
     
     savedSectors <- dataList$savedSectors
@@ -1217,11 +1216,291 @@ function(input, output, session) {
     
   })
   
-  # When user tries to fit the data
-  observeEvent(input$fitData,{
+  # Create function to fit baselines
+  fitBaselines <- function(x,savedSectors,allScans){
+    
+    # Get sector
+    sector <- savedSectors[[x]]
+    
+    # Get data from scan
+    scanInd <- which(allScans==as.numeric(sector$Scan))
+    sectorScan <- dataList$scanData[[scanInd]]
+    
+    # Subset out sector
+    data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
+    
+    # Check that scan and sector match
+    checkScan <- data$AbsoluteScan[1]==sector$Scan
+    checkMinr <- min(data$r)==sector$Min
+    checkMaxr <- max(data$r)==sector$Max
+    
+    if(!checkScan||!checkMinr||!checkMaxr){
+      print(paste("In fit for baseline: data not subset for x = ",x,sep=""))
+      tryCatch(updateLog("Fatal error: data mismatch. Sector not properly subset."),error=function(e)return())
+      return(NA)
+    }
+    
+    # Define r0 reference radius
+    r0 <- data$r[1]
+    data$r0 <- r0
+    
+    # Fit baseline and reference absorbance
+    baselineFit <- gsl_nls(
+      Ar~singleIdealSpecies(r,w,R,temp,r0,A0, Mb, offset),
+      data=data,
+      algorithm='lm',
+      start=c(A0=1,offset=1,Mb=1),
+      lower=c(A0=0,offset=NULL,Mb=0)
+    )
+    
+    # Get fit info
+    fitSummary <- summarizeNLS(baselineFit,"baseline")
+    
+    # Update log
+    tryCatch(updateLog(fitSummary$summary),error=function(e)return())
+    
+    # Get coefficients
+    coefs <- fitSummary$coefs
+    
+    # Extract A0 and offset
+    A0 <- coefs$Estimate[which(rownames(coefs)=="A0")]
+    A0Err <- coefs$`Std. Error`[which(rownames(coefs)=="A0")]
+    offset <- coefs$Estimate[which(rownames(coefs)=="offset")]
+    offsetErr <- coefs$`Std. Error`[which(rownames(coefs)=="offset")]
+    
+    # Add to data
+    data$A0 <- A0
+    data$A0Err <- A0Err
+    data$offset <- offset
+    data$OffsetErr <- offsetErr
+    data$ID <- paste("GROUP",x,sep="")
+    
+    # Add linear transformation for linear plotting
+    data$r2_minus_r0_over_2 <- (data$r^2 - data$r0^2)/2
+    
+    # Calculate y axis so that minimum is 0.001, not 0 or below 0
+    untrans <- (data$Ar-data$offset)/data$A0
+   
+    # Make minimum 0.001
+    trans <- untrans - min(untrans) + 0.001
+    
+    # Get log
+    data$ln_A_minus_offset_over_A0 <- log(untrans)
+    
+    # Plot
+    tmpPlot <- ggplot(data,aes(x=r2_minus_r0_over_2))+
+      geom_point(aes(y=ln_A_minus_offset_over_A0))+
+      theme_prism()
+    
+    # Return data
+    return(data)
+    
+    
+  }
+  
+  # Create function to plot nonlinear fit
+  plotNonlinearFit <- function(baselineFits){
+    
+    nonlinear <- ggplot(baselineFits,aes(x=r))+
+      geom_point(aes(y=Ar-offset))+
+      geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
+      theme_prism()
+    
+    return(nonlinear)
+    
+  }
+  
+  # Create function to plot linear fit
+  plotLinearFit <- function(baselineFits,showSimulation=FALSE){
+    
+    linear <- ggplot(baselineFits,aes(x=r2_minus_r0_over_2))+
+      geom_point(aes(y=ln_A_minus_offset_over_A0))+
+      geom_line(aes(x=r2_minus_r0_over_2,y=linearpAr),col='red',lwd=1)+
+      xlab("(r^2 - r0^2) / 2")+
+      ylab("ln( (Ar - offset) / A0 )")+
+      theme_prism()
+    
+    # Predict if monomer
+    if(showSimulation==TRUE){
+      
+      monomerData <- singleIdealSpecies(r=baselineFits$r,
+                                        w=baselineFits$w,
+                                        R=baselineFits$R,
+                                        temp=baselineFits$temp,
+                                        r0=baselineFits$r0,
+                                        A0=baselineFits$A0,
+                                        Mb=baselineFits$Mb,
+                                        offset=baselineFits$offset)
+      dimerData <- singleIdealSpecies(r=baselineFits$r,
+                                      w=baselineFits$w,
+                                      R=baselineFits$R,
+                                      temp=baselineFits$temp,
+                                      r0=baselineFits$r0,
+                                      A0=baselineFits$A0,
+                                      Mb=(baselineFits$Mb*2),
+                                      offset=baselineFits$offset)
+      
+      baselineFits$monomerSimulation <- monomerData
+      baselineFits$dimerSimulation <- dimerData
+      
+      linear <- linear +
+        geom_line(data=baselineFits,aes(x=r2_minus_r0_over_2,y=log((monomerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
+        geom_line(data=baselineFits,aes(x=r2_minus_r0_over_2,y=log((dimerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
+        scale_color_manual(
+          values=c(
+            "Simulated Dimer / Monomer"='gray50'
+          )
+        )+
+        theme(legend.position='top')
+      
+    }
+    
+    return(linear)
+    
+  }
+  
+  # Create function to fit single ideal species
+  fitSingleIdealSpecies <- function(baselineFits){
+    
+    # Fit for MW
+    mwFit <-  gsl_nls(
+      Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
+      data=baselineFits,
+      algorithm='lm',
+      start=c(Mb=1)
+    )
+    
+    # Extract fitted Mb
+    mwFitSummary <- summarizeNLS(mwFit,dataList$selectedModel)
+    
+    # Update log
+    tryCatch(updateLog(mwFitSummary$summary),error=function(e){return()})
+    
+    # Get coef
+    Mb <- mwFitSummary$coefs[which(rownames(mwFitSummary$coefs)=="Mb"),]
+    
+    # Convert Mb to MW
+    mw <- (Mb$Estimate/(1-(dataList$psvValue*dataList$sd)))/1000
+    mwErr <- (Mb$`Std. Error`/Mb$Estimate)*mw
+    
+    # predict
+    preds <- predict(mwFit,baselineFits)
+    baselineFits$pAr <- preds
+    
+    # Calculate rsqr
+    meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
+    pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
+    rsqr <- 1-(pErr/meanErr)
+    
+    # Plot non linear fit
+    nonlinear <- plotNonlinearFit(baselineFits)
+    
+    # Plot linear
+    linearFit <- lm(ln_A_minus_offset_over_A0~r2_minus_r0_over_2,data=baselineFits)
+    baselineFits$linearpAr <- predict(linearFit,baselineFits)
+    
+    linear <- plotLinearFit(baselineFits)
+    
+    parmRow <- div(
+      class='column',
+      p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
+      p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
+      p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
+    )
+    
+    # Return out list
+    outlist <- list()
+    outlist$linear <- linear
+    outlist$nonlinear <- nonlinear
+    outlist$data <- baselineFits
+    outlist$description <- parmRow
+    
+    return(outlist)
+  }
+  
+  # Create function to fit A + A <-> A2
+  fitAplusAequalsAA <- function(baselineFits){
+    
+    # Check vec
+    checkVec <- c(dataList$mwValue,dataList$eCoefValue)
+    if(length(checkVec)==0||sum(is.na(checkVec))>0){
+      updateLog('Invalid MW or Extinction Coefficient inputs. Unable to fit.')
+      return()
+    }
+    
+    # Calculate buoyant MW
+    mbValue <- dataList$mwValue*(1-(dataList$psv*dataList$sd))
+    baselineFits$Mb <- mbValue
+    
+    # Fit for Ka
+    kaFit <-  gsl_nls(
+      Ar~AAtoA2(r,w,R,temp,r0,A0,Mb,KaA,offset),
+      data=baselineFits,
+      algorithm='lm',
+      start=c(KaA=1),
+      lower=c(KaA=0.000001)
+    )
+    
+    # Extract Ka
+    kaFitSummary <-  summarizeNLS(kaFit,dataList$selectedModel)
+    
+    # Update log
+    tryCatch(updateLog(kaFitSummary$summary),error=function(e){return()})
+    
+    # Get coef
+    kaCoef <- kaFitSummary$coefs[which(rownames(kaFitSummary$coefs)=="KaA"),]
+    
+    # Convert KaA to Kd
+    Kd <- ((1/kaCoef$Estimate)*(2/dataList$eCoefValue))*1000000
+    
+    # For z = Ecoef/2 * Ka^-1 = c * x^a, dz/z = |a| * dx/x
+    KdErr <- 1 * (kaCoef$`Std. Error`/kaCoef$Estimate) * Kd
+    
+    # predict
+    preds <- predict(kaFit,baselineFits)
+    baselineFits$pAr <- preds
+    
+    # Calculate rsqr
+    meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
+    pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
+    rsqr <- 1-(pErr/meanErr)
+    
+    # Plot non linear fit
+    nonlinear <- plotNonlinearFit(baselineFits)
+    
+    # Plot linear
+    linearFit <- lm(ln_A_minus_offset_over_A0~r2_minus_r0_over_2,data=baselineFits)
+    baselineFits$linearpAr <- predict(linearFit,baselineFits)
+    linear <- plotLinearFit(baselineFits,TRUE)
+    
+    parmRow <- div(
+      class='column',
+      p(HTML(paste("<b>Kd</b> = ",round(Kd,2)," +/- ",round(KdErr,2)," uM",sep="")),class='body'),
+      p(HTML(paste("<b>KaA</b> = ",round(kaCoef$Estimate,3)," +/- ",round(kaCoef$`Std. Error`,3),sep="")),class='body'),
+      p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
+    )
+    
+    
+    # Return out list
+    outlist <- list()
+    outlist$linear <- linear
+    outlist$nonlinear <- nonlinear
+    outlist$data <- baselineFits
+    outlist$description <- parmRow
+    return(outlist)
+    
+  }
+  
+  # Create function to check for proper inputs before fitting
+  checkForInputs <- function(){
+    
+    if(length(dataList$selectedModel)==0){
+      selectedModel <- input$modelType
+      updateDataList('selectedModel',selectedModel)
+    }
     
     # Get psv and sd inputs
-
+    
     # Format check vector
     checkVec <- c(input$psvInput,input$sdInput)
     if(length(checkVec)==0){
@@ -1256,128 +1535,43 @@ function(input, output, session) {
     # Loop through saved sectors
     if(length(savedSectors)==0){
       updateLog("No sectors to fit. Save sectors to fit a model.")
+      return(FALSE)
+    }
+    
+    return(TRUE)
+    
+  }
+  
+  # When user tries to fit the data
+  observeEvent(input$fitData,{
+    
+    checkInputs <- tryCatch(checkForInputs(),error=function(e)return(FALSE))
+    
+    if(checkInputs==FALSE){
       return()
     }
     
-    # Fit baselines
-    baselineFits <- lapply(1:length(savedSectors),function(x){
-      # Get sector
-      sector <- savedSectors[[x]]
-      
-      # Get data from scan
-      allScans <- unique(lapply(dataList$scanData,'[[','AbsoluteScan') %>% unlist())
-      scanInd <- which(allScans==as.numeric(sector$Scan))
-      sectorScan <- dataList$scanData[[scanInd]]
-      
-      # Subset out sector
-      data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
-      
-      # Define r0 reference radius
-      r0 <- data$r[1]
-      data$r0 <- r0
-      
-      # Fit baseline and reference absorbance
-      baselineFit <- gsl_nls(
-        Ar~singleIdealSpecies(r,w,R,temp,r0,A0, Mb, offset),
-        data=data,
-        algorithm='lm',
-        start=c(A0=1,offset=1,Mb=1),
-        lower=c(A0=0,offset=NULL,Mb=0)
-      )
-      
-      # Get fit info
-      fitSummary <- summarizeNLS(baselineFit,"baseline")
-      
-      # Update log
-      tryCatch(updateLog(fitSummary$summary),error=function(e)return())
-      
-      # Get coefficients
-      coefs <- fitSummary$coefs
-      
-      # Extract A0 and offset
-      A0 <- coefs$Estimate[which(rownames(coefs)=="A0")]
-      A0Err <- coefs$`Std. Error`[which(rownames(coefs)=="A0")]
-      offset <- coefs$Estimate[which(rownames(coefs)=="offset")]
-      offsetErr <- coefs$`Std. Error`[which(rownames(coefs)=="offset")]
-      
-      # Add to data
-      data$A0 <- A0
-      data$A0Err <- A0Err
-      data$offset <- offset
-      data$OffsetErr <- offsetErr
-      data$ID <- paste("GROUP",x,sep="")
-      
-      # Return data
-      return(data)
-      
-      
-    }) %>% bind_rows()
+    # Get saved sectors
+    savedSectors <- dataList$savedSectors 
     
+    # Get all absolute scans
+    allScans <- unique(lapply(dataList$scanData,'[[','AbsoluteScan') %>% unlist())
     
-    if(length(dataList$selectedModel)==0){
-      selectedModel <- input$modelType
-      updateDataList('selectedModel',selectedModel)
+    # Fit baselines and combine all data for global fit
+    baselineFitsList <- lapply(1:length(savedSectors),fitBaselines,savedSectors=savedSectors,allScans=allScans)
+    
+    if(length(which(is.na(baselineFitsList)))>0){
+      print("Error in fitting baseline")
+      tryCatch(updateLog("Error fitting baselines"),error=function(e)return())
+      return()
     }
+    
+    baselineFits <- baselineFitsList %>% bind_rows()
     
     if(dataList$selectedModel=='MW / Single ideal species'){
       
-      # Fit for MW
-      mwFit <-  gsl_nls(
-        Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
-        data=baselineFits,
-        algorithm='lm',
-        start=c(Mb=1)
-      )
-      
-      # Extract fitted Mb
-      mwFitSummary <- summarizeNLS(mwFit,dataList$selectedModel)
-      
-      # Update log
-      tryCatch(updateLog(mwFitSummary$summary),error=function(e){return()})
-      
-      # Get coef
-      Mb <- mwFitSummary$coefs[which(rownames(mwFitSummary$coefs)=="Mb"),]
-      
-      # Convert Mb to MW
-      mw <- (Mb$Estimate/(1-(psv*sd)))/1000
-      mwErr <- (Mb$`Std. Error`/Mb$Estimate)*mw
-      
-      # predict
-      preds <- predict(mwFit,baselineFits)
-      baselineFits$pAr <- preds
-      
-      # Calculate rsqr
-      meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
-      pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
-      rsqr <- 1-(pErr/meanErr)
-      
-      # Plot non linear fit
-      nonlinear <- ggplot(baselineFits,aes(x=r))+
-        geom_point(aes(y=Ar-offset))+
-        geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
-        theme_prism()
-      
-      # Plot linear
-      lineardf <- data.frame(
-        y = log((baselineFits$Ar-baselineFits$offset)/baselineFits$A0),
-        x = ((baselineFits$r^2-baselineFits$r0^2)/2)
-      )
-      linearFit <- lm(y~x,data=lineardf)
-      baselineFits$linearpAr <- predict(linearFit,lineardf)
-      
-      linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
-        geom_point(aes(y=log((Ar-offset)/A0)))+
-        geom_line(aes(x=((r^2-r0^2)/2),y=linearpAr),col='red',lwd=1)+
-        xlab("(r^2 - r0^2) / 2")+
-        ylab("ln( (Ar - offset) / A0 )")+
-        theme_prism()
-      
-      parmRow <- div(
-        class='column',
-        p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
-        p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
-        p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
-      )
+      # Return data, linear plot and nonlinear plot
+      fit <- fitSingleIdealSpecies(baselineFits)
    
       
     } else if(dataList$selectedModel=='Kd / A + A <-> AA'){
@@ -1390,116 +1584,16 @@ function(input, output, session) {
       updateDataList('mwValue',mwValue)
       updateDataList('eCoefValue',eCoefValue)
       
-      # Check vec
-      checkVec <- c(dataList$mwValue,dataList$eCoefValue)
-      if(length(checkVec)==0||sum(is.na(checkVec))>0){
-        updateLog('Invalid MW or Extinction Coefficient inputs. Unable to fit.')
-        return()
-      }
-      
-      # Calculate buoyant MW
-      mbValue <- dataList$mwValue*(1-(dataList$psv*dataList$sd))
-      baselineFits$Mb <- mbValue
-
-      # Fit for Ka
-      kaFit <-  gsl_nls(
-        Ar~AAtoA2(r,w,R,temp,r0,A0,Mb,KaA,offset),
-        data=baselineFits,
-        algorithm='lm',
-        start=c(KaA=1),
-        lower=c(KaA=0.000001)
-      )
-      
-      # Extract Ka
-      kaFitSummary <-  summarizeNLS(kaFit,dataList$selectedModel)
-      
-      # Update log
-      tryCatch(updateLog(kaFitSummary$summary),error=function(e){return()})
-      
-      # Get coef
-      kaCoef <- kaFitSummary$coefs[which(rownames(kaFitSummary$coefs)=="KaA"),]
-      
-      # Convert KaA to Kd
-      Kd <- ((1/kaCoef$Estimate)*(2/dataList$eCoefValue))*1000000
-      
-      # For z = Ecoef/2 * Ka^-1 = c * x^a, dz/z = |a| * dx/x
-      KdErr <- 1 * (kaCoef$`Std. Error`/kaCoef$Estimate) * Kd
-      
-      # predict
-      preds <- predict(kaFit,baselineFits)
-      baselineFits$pAr <- preds
-      
-      # Calculate rsqr
-      meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
-      pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
-      rsqr <- 1-(pErr/meanErr)
-      
-      # Plot non linear fit
-      nonlinear <- ggplot(baselineFits,aes(x=r))+
-        geom_point(aes(y=Ar-offset))+
-        geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
-        theme_prism()
-      
-      # Plot linear
-      lineardf <- data.frame(
-        y = log((baselineFits$Ar-baselineFits$offset)/baselineFits$A0),
-        x = ((baselineFits$r^2-baselineFits$r0^2)/2)
-      )
-      linearFit <- lm(y~x,data=lineardf)
-      baselineFits$linearpAr <- predict(linearFit,lineardf)
-      
-      # Predict if monomer
-      monomerData <- singleIdealSpecies(r=baselineFits$r,
-                                        w=baselineFits$w,
-                                        R=baselineFits$R,
-                                        temp=baselineFits$temp,
-                                        r0=baselineFits$r0,
-                                        A0=baselineFits$A0,
-                                        Mb=baselineFits$Mb,
-                                        offset=baselineFits$offset)
-      dimerData <- singleIdealSpecies(r=baselineFits$r,
-                                      w=baselineFits$w,
-                                      R=baselineFits$R,
-                                      temp=baselineFits$temp,
-                                      r0=baselineFits$r0,
-                                      A0=baselineFits$A0,
-                                      Mb=(baselineFits$Mb*2),
-                                      offset=baselineFits$offset)
-      baselineFits$monomerSimulation <- monomerData
-      baselineFits$dimerSimulation <- dimerData
-      
-      linear <- ggplot(baselineFits,aes(x=((r^2-r0^2)/2)))+
-        geom_point(aes(y=log((Ar-offset)/A0)))+
-        geom_line(aes(y=log((monomerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
-        geom_line(aes(y=log((dimerSimulation-offset)/A0),color='Simulated Dimer / Monomer',group=1),lwd=1)+
-        geom_line(aes(x=((r^2-r0^2)/2),y=linearpAr),col='red',lwd=1)+
-        scale_color_manual(
-          values=c(
-            "Simulated Dimer / Monomer"='gray50'
-          )
-        )+
-        xlab("(r^2 - r0^2) / 2")+
-        ylab("ln( (Ar - offset) / A0 )")+
-        theme_prism()+
-        theme(legend.position='top')
-      
-      
-      parmRow <- div(
-        class='column',
-        p(HTML(paste("<b>Kd</b> = ",round(Kd,2)," +/- ",round(KdErr,2)," uM",sep="")),class='body'),
-        p(HTML(paste("<b>KaA</b> = ",round(kaCoef$Estimate,3)," +/- ",round(kaCoef$`Std. Error`,3),sep="")),class='body'),
-        p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
-      )
+      fit <- fitAplusAequalsAA(baselineFits)
       
     }
     
     # Render plots as outputs
-    output$nonlinearPlot <- renderPlot(nonlinear,width=325,height=300)
-    output$linearPlot <- renderPlot(linear,width=325,height=300)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=325,height=300)
+    output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
     
-    # Update data list with the plots
-    .GlobalEnv$linearPlot <- linear
-    .GlobalEnv$nonlinearPlot <- nonlinear
+    # Save fit to global env
+    .GlobalEnv$fit <- fit
     
     # Render ui
     output$fitResult <- renderUI({
@@ -1510,7 +1604,7 @@ function(input, output, session) {
           paste("UA_FIT_",paste(unlist(str_extract_all(Sys.time(),"[:digit:]")),collapse=""),".csv",sep="")
         },
         content=function(file){
-          write.csv(baselineFits,file=file,row.names=FALSE)
+          write.csv(fit$data,file=file,row.names=FALSE)
         }
       )#download handler
       
@@ -1537,7 +1631,7 @@ function(input, output, session) {
         div(
           class='column',style='width:fit-contents;margin-left:30px',
           div(class='row',
-            parmRow
+              fit$description
           ),
           div(
             class='row',style='margin-top:15px;align-self:flex-end',
@@ -1565,12 +1659,12 @@ function(input, output, session) {
     .GlobalEnv$userClick <- input$clickFitResultLinear
     
     # Get linear plot data
-    linearPlot <- linearPlot
+    linearPlot <- fit$linear
     linearPlotData <- linearPlot$data
     
     # Get x and y
-    x <- (linearPlotData$r^2-linearPlotData$r0^2)/2
-    y <- log((linearPlotData$Ar-linearPlotData$offset)/linearPlotData$A0)
+    x <- linearPlotData$r2_minus_r0_over_2
+    y <- linearPlotData$ln_A_minus_offset_over_A0
     
     # Get errs
     errs <- sqrt((userClick$x-x)^2+(userClick$y-y)^2)
@@ -1581,17 +1675,17 @@ function(input, output, session) {
     
     # Rerender plot with nearest point
     newPlot <- linearPlot+
-      geom_point(data=nearestPoint,aes(x=(r^2-r0^2)/2,
-                                       y=log((Ar-offset)/A0)),
+      geom_point(data=nearestPoint,aes(x=r2_minus_r0_over_2,
+                                       y=ln_A_minus_offset_over_A0),
                  col='blue',size=4)+
-      geom_label(data=nearestPoint,aes(x=min(x,na.rm=TRUE),
-                                      y=max(y,na.rm=TRUE)*0.95),
+      geom_label(data=nearestPoint,aes(x=-Inf,
+                                      y=Inf),
                 label=paste("Scan ",
                             nearestPoint$AbsoluteScan,
                             " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
-                            '\n(',round((nearestPoint$r^2-nearestPoint$r0^2)/2,3),
-                            ', ',round(log((nearestPoint$Ar-nearestPoint$offset)/nearestPoint$A0),3),')',
-                            sep=""),col='blue',hjust=0,fontface='bold')
+                            '\n(',round(nearestPoint$r2_minus_r0_over_2,3),
+                            ', ',round(nearestPoint$ln_A_minus_offset_over_A0,3),')',
+                            sep=""),col='black',hjust=0,vjust=1,fontface='bold')
     
     output$linearPlot <- renderPlot(newPlot,width=325,height=300)
     
@@ -1603,7 +1697,7 @@ function(input, output, session) {
     .GlobalEnv$userClick <- input$clickFitResultNonlinear
     
     # Get linear plot data
-    nonlinearPlot <- nonlinearPlot
+    nonlinearPlot <- fit$nonlinear
     nonlinearPlotData <- nonlinearPlot$data
     
     # Get x and y
@@ -1622,14 +1716,14 @@ function(input, output, session) {
       geom_point(data=nearestPoint,aes(x=r,
                                        y=Ar-offset),
                  col='blue',size=4)+
-      geom_label(data=nearestPoint,aes(x=min(x,na.rm=TRUE),
-                                      y=max(y,na.rm=TRUE)*0.95),
+      geom_label(data=nearestPoint,aes(x=-Inf,
+                                      y=Inf),
                 label=paste("Scan ",
                             nearestPoint$AbsoluteScan,
                             " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
                             "\n(",round(nearestPoint$r,3),
                             ", ",round(nearestPoint$Ar-nearestPoint$offset,3),")",
-                            sep=""),col='blue',hjust=0,fontface='bold')
+                            sep=""),col='black',hjust=0,vjust=1,fontface='bold')
     
     output$nonlinearPlot <- renderPlot(newPlot,width=325,height=300)
     
@@ -1637,7 +1731,7 @@ function(input, output, session) {
   
   # Reset plots
   observeEvent(input$resetFitPlots,{
-    output$nonlinearPlot <- renderPlot(nonlinearPlot,width=325,height=300)
-    output$linearPlot <- renderPlot(linearPlot,width=325,height=300)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=325,height=300)
+    output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
   })
 }
