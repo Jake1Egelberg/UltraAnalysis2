@@ -139,11 +139,11 @@
   coefInfoSpec <- 2
   coefInfo <- paste(paste(rownames(fitCoefs),": ",round(fitCoefs$Estimate,coefInfoSpec)," +/- ",round(fitCoefs$`Std. Error`,coefInfoSpec),sep=""),collapse=", ")
   itToConverge <- fitSummary$convInfo$finIter
-  convegeTolerance <- fitSummary$convInfo$finTol
+  residualSE <- round(fitSummary$sigma,5)
   
   # Format summary string
   summaryString <- paste(
-    "Fitting for: ",type," | ",itToConverge," iterations to convergence | Convergence tolerance: ",convegeTolerance,
+    "Fitting for: ",type," | ",itToConverge," iterations to convergence | Residual SE: ",residualSE,
     " | ",parmsFit," parameters fit: ",coefInfo,sep=""
     
   )
