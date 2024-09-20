@@ -61,7 +61,15 @@
     color:black;
     font-weight:bold;
   }
-
+  
+ .checkbox, .radio {
+    margin-top: 0px;
+  }
+ 
+  #scanSelectionDiv #smallCheck span{
+    font-size:12px;  
+  }
+  
 /* style flex */
 
   .row {
@@ -104,6 +112,15 @@
    .log {
      color: #000000;
      font-size: 16px;
+   }
+   
+   #logDiv {
+     height:20vh;
+   }
+   
+   #logDiv:hover{
+     height:60vh;
+     transform:translateY(-40vh);
    }
  
 

@@ -1,10 +1,13 @@
 div(
   class='row',style='height:65vh;',
   div(
-    class='column',style='width:19%;height:100%;padding:10px;',
+    class='column',style='width:19%;height:100%;padding:10px;',id='scanSelectionDiv',
     p('Included scans',class='header'),
     uiOutput('scanSelectionInput'),
-    
+    div(
+      style='padding:0 20px',
+      checkboxInput('scaleSelectionPlot','Restrict y-axis to 0 < A(r) < 1',FALSE) %>% tagAppendAttributes(id='smallCheck'),
+    ),
     p('Saved sectors',class='header'),
     
     div(

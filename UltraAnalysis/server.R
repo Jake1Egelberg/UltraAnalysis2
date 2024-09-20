@@ -210,7 +210,7 @@ testplot <- ggplot(data.frame(x=1:10,y=1:10),aes(x=x,y=y))+
 function(input, output, session) {
 
   # ------------ STARTUP
-  
+
   # Update the log text
   updateLog <- function(update){
     
@@ -736,10 +736,10 @@ function(input, output, session) {
         renderPlot(
           bothPlots,
           width=350,
-          height=180
+          height=230
         ),
         div(style='margin:10px auto;',
-            textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
+            #textInput('receptorInput',NULL,NULL,width=300,'Receptor concentration (uM)')
         ),
         div(style='margin:-10px auto;',
             actionButton('saveSector',label="💾 Save sector")
@@ -813,12 +813,23 @@ function(input, output, session) {
       
     }
     
+    scaleValue <- ifelse(length(input$scaleSelectionPlot)>0,input$scaleSelectionPlot,FALSE)
+    if(scaleValue){
+      currentScanPlot <- currentScanPlot +
+        scale_y_continuous(limits=c(0,1))
+    }
+    
     #Render output
     output$currentScanPlotOutput <- renderPlot(
       currentScanPlot,width=600,height=300
     )
     
   }
+  
+  # Observe scaling y axis
+  observeEvent(input$scaleSelectionPlot,{
+    renderScanPlot()
+  })
   
   # When user selects a scan to see up close
   observeEvent(input$selectScan,{
@@ -849,9 +860,17 @@ function(input, output, session) {
     }
     
     # Transform
+    transy <- tryCatch(
+      log(sectorData$Ar),
+      warning=function(w){
+        warningString <- paste("<b>Warning</b> in ln(Ar) of selected sector: ",w[[1]],sep="")
+        updateLog(warningString)
+        return(log(sectorData$Ar))
+      }
+    )
     transformed <- data.frame(
       x = sectorData$r^2,
-      y = log(sectorData$Ar)
+      y = transy
     )
     
     # Get linear fit
@@ -979,7 +998,9 @@ function(input, output, session) {
   observeEvent(input$saveSector,{
     
     # Get receptor concentration
-    receptorConcentration <- tryCatch(ifelse(input$receptorInput=="",0,input$receptorInput),error=function(e)return(0))
+    receptorConcentration <- tryCatch(ifelse(length(input$receptorInput)==0,0,
+                                             ifelse(input$receptorInput=='',0,input$receptorInput)
+                                             ),error=function(e)return(0))
     
     # Get scan data
     scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
@@ -1236,7 +1257,7 @@ function(input, output, session) {
     
     if(!checkScan||!checkMinr||!checkMaxr){
       print(paste("In fit for baseline: data not subset for x = ",x,sep=""))
-      tryCatch(updateLog("Fatal error: data mismatch. Sector not properly subset."),error=function(e)return())
+      tryCatch(updateLog("<b>Fatal error:</b> data mismatch. Sector not properly subset."),error=function(e)return())
       return(NA)
     }
     
@@ -1282,10 +1303,15 @@ function(input, output, session) {
     untrans <- (data$Ar-data$offset)/data$A0
    
     # Make minimum 0.001
-    trans <- untrans - min(untrans) + 0.001
+    trans <- tryCatch(log(untrans),
+                      warning=function(w){
+                        warningString <- paste("Warning in ln( (Ar - offset) / A0): ",w[[1]],sep="")
+                        tryCatch(updateLog(warningString),error=function(e)return())
+                        return(log(untrans))
+                      })
     
     # Get log
-    data$ln_A_minus_offset_over_A0 <- log(untrans)
+    data$ln_A_minus_offset_over_A0 <- trans
     
     # Plot
     tmpPlot <- ggplot(data,aes(x=r2_minus_r0_over_2))+
@@ -1305,6 +1331,13 @@ function(input, output, session) {
       geom_point(aes(y=Ar-offset))+
       geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
       theme_prism()
+    
+    tryCatch(print(nonlinear),
+             warning=function(w){
+               warningString <- paste("<b>Warning</b> in nonlinear plotting: ",w[[1]],sep="")
+               updateLog(warningString)
+               return()
+             })
     
     return(nonlinear)
     
@@ -1354,6 +1387,13 @@ function(input, output, session) {
         theme(legend.position='top')
       
     }
+    
+    tryCatch(print(linear),
+             warning=function(w){
+               warningString <- paste("<b>Warning</b> in linear plotting: ",w[[1]],sep="")
+               updateLog(warningString)
+               return()
+             })
     
     return(linear)
     
@@ -1734,4 +1774,5 @@ function(input, output, session) {
     output$nonlinearPlot <- renderPlot(fit$nonlinear,width=325,height=300)
     output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
   })
+  
 }

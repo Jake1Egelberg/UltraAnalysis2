@@ -1,7 +1,12 @@
 
 div(
-  class='column',style='background-color:#d6d6d6;width:100%;height:20vh;padding:10px;border-top: 1.5px solid black;overflow-y:scroll',
+  class='column',style='
+  background-color:#d6d6d6;
+  width:100%;
+  padding:10px;
+  border-top: 1.5px solid black;
+  overflow-y:scroll',id='logDiv',
   lapply(dataList$logText,function(text){
-    p(text, class='log')
+    p(HTML(text), class='log')
   })
 )
