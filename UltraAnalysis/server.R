@@ -36,7 +36,7 @@
     w <- rpm * 0.1047 
     
     # Get only values
-    valueLines <- scanLines[-c(1:2),]
+    valueLines <- scanLines[-1,]
     
     # Split values
     splitValues <- strsplit(valueLines," ")
