@@ -57,7 +57,7 @@
     absorbance <- unlist(lapply(noBlanks,'[[',2))
     noise <- unlist(lapply(noBlanks,'[[',3))
     
-    R <- 8.314 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
+    R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
     
     # Get scan number
     scanNum <- as.numeric(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1))
@@ -1261,17 +1261,16 @@ function(input, output, session) {
       return(NA)
     }
     
-    # Define r0 reference radius
-    r0 <- data$r[1]
+    # Define r0 reference radius as 2/3 down sector per hetero documentation
+    r0 <- (diff(range(data$r))*(2/3))+min(data$r)
     data$r0 <- r0
     
     # Fit baseline and reference absorbance
     baselineFit <- gsl_nls(
-      Ar~singleIdealSpecies(r,w,R,temp,r0,A0, Mb, offset),
+      Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
       data=data,
       algorithm='lm',
-      start=c(A0=1,offset=1,Mb=1),
-      lower=c(A0=0,offset=NULL,Mb=0)
+      start=c(A0=1,offset=1,Mb=1)
     )
     
     # Get fit info
