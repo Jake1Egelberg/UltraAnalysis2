@@ -241,6 +241,13 @@ fitData <- globalData %>% select(
 modelType <- c("MW / Single ideal species",
                "Kd / A + A <-> AA")[2]
 
+# Define local fit boilerplate
+localFitBoilerplate <- "
+  A0 <- lapply(paste('A0',ID,sep=''),function(x){get(x)}) %>% unlist()
+  offset <- lapply(paste('offset',ID,sep=''),function(x){get(x)}) %>% unlist()
+"
+
+
 if(modelType=='MW / Single ideal species'){
   
   dataCols <- c("r","r0","w","temp","Ar","R","ID")
@@ -249,11 +256,10 @@ if(modelType=='MW / Single ideal species'){
   
   fitFunction <- "
     function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
-    
-      A0 <- lapply(paste('A0',ID,sep=''),function(x){get(x)}) %>% unlist()
-      offset <- lapply(paste('offset',ID,sep=''),function(x){get(x)}) %>% unlist()
+      LOCAL_FIT_BOILERPLATE
       
       Ar <- (offset) + ( (A0) * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) ) )
+      
       return(Ar)
     }
   "
@@ -268,15 +274,13 @@ if(modelType=='MW / Single ideal species'){
   
   fitFunction <- "
     function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
-    
-      A0 <- lapply(paste('A0',ID,sep=''),function(x){get(x)}) %>% unlist()
-      offset <- lapply(paste('offset',ID,sep=''),function(x){get(x)}) %>% unlist()
+      LOCAL_FIT_BOILERPLATE
     
       theta <- w^2 / (2*R*temp)
-      
       monomerTerm <- A0 * exp(1)^( Mb * theta * (r^2 - r0^2) )
       dimerTerm <-  N * K * A0^N * exp(1)^( N * Mb * theta * (r^2 - r0^2) )
       Ar <- offset + monomerTerm + dimerTerm
+      
       return(Ar)
     }
   "
@@ -304,8 +308,8 @@ localParmListStart <- paste(localParmList,'=1',sep='',collapse=',')
 startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
 
 # Substitute parameters into fit function
-
-dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,fitFunction)
+dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitFunction)
+dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
 dynamicFitFunction <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitFunction)
 dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParmList,dynamicFitFunction)
 
@@ -343,13 +347,3 @@ ggplot(fitData,aes(x=r))+
   theme_prism()
 
 sum
-
-
-
-
-
-
-
-
-
-
