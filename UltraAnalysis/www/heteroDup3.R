@@ -238,7 +238,7 @@ fitData <- globalData %>% select(
 )
 
 modelType <- c("MW / Single ideal species",
-               "Kd / A + A <-> AA")[2]
+               "Kd / A + A <-> AA")[1]
 
 if(modelType=='MW / Single ideal species'){
   
@@ -290,7 +290,6 @@ dataColumnList <- paste(dataCols,collapse=',')
 
 globalParmList <- globalParms
 globalParmListStart <- paste(globalParmList,'=1',sep='',collapse=',')
-startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
 
 localParmList <- lapply(localParms,function(x){
   vec<-rep(x,parmArrayLength)
@@ -299,6 +298,8 @@ localParmList <- lapply(localParms,function(x){
 }) %>% unlist()
 localParmListCollapsed <- paste(localParmList,collapse=",")
 localParmListStart <- paste(localParmList,'=1',sep='',collapse=',')
+
+startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
 
 # Substitute parameters into fit function
 
