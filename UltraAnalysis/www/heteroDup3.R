@@ -16,6 +16,7 @@ mwFunction <- function(r, w, temp, r0, R, A0, Mb, offset){
 R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
 
 selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
+selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
 
 # Read selected log file
 readLogFile <- function(selectedCells){
@@ -238,7 +239,7 @@ fitData <- globalData %>% select(
 )
 
 modelType <- c("MW / Single ideal species",
-               "Kd / A + A <-> AA")[1]
+               "Kd / A + A <-> AA")[2]
 
 if(modelType=='MW / Single ideal species'){
   
@@ -261,7 +262,7 @@ if(modelType=='MW / Single ideal species'){
   
 } else if(modelType=='Kd / A + A <-> AA'){
   
-  dataCols <- c("r","r0","w","temp","Ar","R","Mb","ID")
+  dataCols <- c("r","r0","w","temp","Ar","R","Mb","N","ID")
   localParms <- c("A0","offset")
   globalParms <- c("K")
   
@@ -274,13 +275,14 @@ if(modelType=='MW / Single ideal species'){
       theta <- w^2 / (2*R*temp)
       
       monomerTerm <- A0 * exp(1)^( Mb * theta * (r^2 - r0^2) )
-      dimerTerm <-  2 * K * A0^2 * exp(1)^( 2 * Mb * theta * (r^2 - r0^2) )
+      dimerTerm <-  N * K * A0^N * exp(1)^( N * Mb * theta * (r^2 - r0^2) )
       Ar <- offset + monomerTerm + dimerTerm
       return(Ar)
     }
   "
   
   fitData$Mb <- 20000
+  fitData$N <- 2
   
 }
 
@@ -332,7 +334,21 @@ globalFit <- eval(parse(text=dynamicFitString))
 
 # Get summary
 sum <- summary(globalFit)
+
+# Plot predictions
+fitData$pAr <- predict(globalFit,fitData)
+ggplot(fitData,aes(x=r))+
+  geom_point(aes(y=Ar))+
+  geom_line(aes(y=pAr,group=ID),col='red',lwd=1)+
+  theme_prism()
+
 sum
+
+
+
+
+
+
 
 
 
