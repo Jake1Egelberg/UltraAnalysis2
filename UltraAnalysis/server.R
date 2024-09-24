@@ -33,7 +33,7 @@
     cellNumber <- as.numeric(metaVec[2])
     temp <- as.numeric(metaVec[3])+273.15
     rpm <- as.numeric(metaVec[4])
-    w <- rpm * 0.1047 
+    w <- (rpm/60)*2*pi
     
     # Get only values
     valueLines <- scanLines[-1,]
