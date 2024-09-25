@@ -5,6 +5,19 @@
   return(Ar)
 }
 
+# file <- c(
+#   "C:/1_Documents/Ferguson Lab/UltraAnalysis2/Data/00027.RA4",
+#   "C:/1_Documents/Ferguson Lab/UltraAnalysis2/Data/00026.RA4",
+#   "C:/1_Documents/Ferguson Lab/UltraAnalysis2/Data/00025.RA4",
+#   "C:/1_Documents/Ferguson Lab/UltraAnalysis2/Data/00024.RA4"
+# )
+# filenames <-  c(
+#   "00027.RA4",
+#   "00026.RA4",
+#   "00025.RA4",
+#   "00024.RA4"
+# )
+
 # Read each scan
 .GlobalEnv$readScans <- function(file,filenames){
   
@@ -63,6 +76,7 @@
       Speed = rpm,
       Scan = x,
       AbsoluteScan = scanNum,
+      CellScanSpeed = NA,
       r = radialPosition,
       Ar = absorbance,
       r0=NA,
@@ -73,6 +87,7 @@
     ) %>% mutate_all(as.numeric)
     dfValues$Name <- scanName
     dfValues$File <- file[x]
+    dfValues$CellScanSpeed <- paste("Cell ",cellNumber," Scan ",scanNum," ",rpm," rpm",sep="")
     
     naInds <- which(is.na(dfValues$Ar))
     if(length(naInds)>0){
@@ -86,12 +101,9 @@
   }
   out <- lapply(1:length(file),readAScan,file=file,filenames=filenames)
   
-  # Name scan list with condition
-  cell <- unique(out[[1]]$Cell)
-  scan <- unique(out[[1]]$Scan)
-  speed <- unique(out[[1]]$Speed)
-  cellScanSpeed <- paste("Cell ",cell," Scan ",scan," ",speed," rpm",sep="")
-  names(out) <- cellScanSpeed
+  # Get scan names
+  scanNames <- lapply(out,'[[','AbsoluteScan')%>%unlist()%>%unique()
+  names(out) <- scanNames
 
   return(out)
   
@@ -248,7 +260,6 @@ function(input, output, session) {
     resetUI()
     updateLog('UltraAnalysis loaded')
   })
-  
   
   # ------------ ON TAB SWITCH
   
@@ -602,16 +613,17 @@ function(input, output, session) {
         x = (rawSectorData$r^2),
         y = suppressWarnings(log(rawSectorData$Ar))
       )
-    
+
       # Split data into groups of 10 datapoints
       n <- ceiling(nrow(sectorData)*0.25)
       errList <- lapply(1:(nrow(sectorData)-n),function(y){
-        
+     
         rawSub <- rawSectorData[y:(y+n),]
         sub <- sectorData[y:(y+n),]
         
-        # Skip fits for data with NA
-        if(length(which(is.na(sub$y)))>0){
+        # Skip fits for data with NA or -Inf
+        badInds <- which(is.na(sub$y)|sub$y==-Inf)
+        if(length(badInds)>0){
           out <- list()
           out$metrics <- NA
           return(out)
@@ -695,7 +707,7 @@ function(input, output, session) {
   renderScanSelection <- function(selectedScan=NULL){
     
     if(length(selectedScan)==0){
-      defaultSelection <- dataList$absoluteScanNumbers[1]
+      defaultSelection <- dataList$selectedScan
     } else{
       defaultSelection <- selectedScan
     }
@@ -739,6 +751,17 @@ function(input, output, session) {
     )
   }
   
+  # Function to retrieve scan data given data list and a selected scan
+  retrieveScanData <- function(){
+    
+    scanNames <- names(dataList$scanData)
+    selectedScanInd <- which(dataList$selectedScan==scanNames)
+    selectedScanData <- dataList$scanData[[selectedScanInd]]
+    
+    return(selectedScanData)
+    
+  }
+  
   # Function to render scan plot
   renderScanPlot <- function(selectedSector=NULL,sectorLabel=NULL,bothPlots=NULL){
 
@@ -754,8 +777,7 @@ function(input, output, session) {
       return()
     }
     
-    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
-    currentScanData <- dataList$scanData[[scanInd]]
+    currentScanData <- retrieveScanData()
     
     if(length(currentScanData)==0){
       return()
@@ -954,8 +976,7 @@ function(input, output, session) {
   # When user brushes an area on the plot (selects a sector)
   observeEvent(input$selectingSector,{
     
-    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
-    currentScanData <- dataList$scanData[[scanInd]]
+    currentScanData <- retrieveScanData()
     selectedSector <- input$selectingSector
     
     # If selectedSector is alreayd equal to the selected sector, then return instead of running 2x
@@ -997,8 +1018,7 @@ function(input, output, session) {
                                              ),error=function(e)return(0))
     
     # Get scan data
-    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
-    currentScanData <- dataList$scanData[[scanInd]]
+    currentScanData <- retrieveScanData()
     
     # Get sector data
     selectedSector <- dataList$selectedSector
@@ -1142,8 +1162,7 @@ function(input, output, session) {
     resetBrush()
 
     # Get current scan data
-    scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
-    currentScanData <- dataList$scanData[[scanInd]]
+    currentScanData <- retrieveScanData()
     
     # Render sector plots
     renderSelectedSectorPlots(currentScanData,sectorList)
@@ -1395,6 +1414,9 @@ function(input, output, session) {
       # Select only data that will be used in fits
       fitData <- data %>% select(all_of(dataCols))
       
+      # add absolute scan column
+      fitData$AbsoluteScan <- data$AbsoluteScan
+      
       # Return data
       return(fitData)
       
@@ -1486,10 +1508,11 @@ function(input, output, session) {
     .GlobalEnv$plotNonlinearResiduals <- function(globalFitDup){
       
       
-      residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=Ar-pAr))+
+      residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=Ar-pAr,col=as.character(ID)))+
         geom_point()+
         geom_hline(yintercept=0,col='red')+
-        theme_prism()
+        theme_prism()+
+        theme(legend.position = 'none')
       
       return(residualPlot)
       
@@ -1624,7 +1647,7 @@ function(input, output, session) {
         )
       } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
         coefRow <- fitSummary$coefs[which(rownames(fitSummary$coefs)=='K'),]
-        displayedKd <- ((1/coefRow$Estimate)*(2/dataList$eCoefValue))*1000000
+        displayedKd <- ((1/coefRow$Estimate)*(dataList$nValue/dataList$eCoefValue))*1000000
         displayedKdErr <- (coefRow$`Std. Error`/coefRow$Estimate)*displayedKd
         displayedText <- paste(
           "Kd = ",round(displayedKd,2)," +/- ",round(displayedKdErr,2)," uM",sep=""
@@ -1647,6 +1670,8 @@ function(input, output, session) {
       
     }
 
+    .GlobalEnv$fitPlotWidth <- 290
+    .GlobalEnv$fitPlotHeight <- 300
   
   # When user tries to fit the data
   observeEvent(input$fitData,{
@@ -1656,6 +1681,10 @@ function(input, output, session) {
     if(checkInputs==FALSE){
       return()
     }
+    
+    .GlobalEnv$progress <- shiny::Progress$new()
+    progress$set(message='Fitting data...',value=0.5)
+    
     
     # Get saved sectors
     savedSectors <- dataList$savedSectors 
@@ -1698,14 +1727,20 @@ function(input, output, session) {
     dev.off()
     
     # Render plots as outputs
-    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=640,height=230)
-    output$residualPlot <- renderPlot(fit$residuals,width=640,height=140)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=fitPlotWidth,height=fitPlotHeight)
+    output$residualPlot <- renderPlot(fit$residuals,width=fitPlotWidth,height=fitPlotHeight)
     #output$linearPlot <- renderPlot(fit$linear,width=320,height=300)
     
     # Save fit to global env
     .GlobalEnv$fit <- fit
     
     # Render ui
+    renderFitOutput()
+    progress$close()
+  })
+  
+  # Function to render the fit output
+  renderFitOutput <- function(){
     output$fitResult <- renderUI({
       
       #Define download handler
@@ -1732,12 +1767,15 @@ function(input, output, session) {
         class='row',
         div(
           class='column',style='width:fit-contents;margin-left:15px;',
-          plotOutput('nonlinearPlot',click='clickFitResultNonlinear',dblclick='resetFitPlots',height = "230px"),
-          plotOutput('residualPlot')
+          plotOutput('nonlinearPlot',click='clickFitResultNonlinear',dblclick='resetFitPlots',height = paste(fitPlotHeight,'px',sep="")),
+        ),
+        div(
+          class='column',style='width:fit-contents;margin-left:5px;',
+          plotOutput('residualPlot',click='clickFitResultNonlinearResiduals',dblclick='resetFitPlots',height = paste(fitPlotHeight,'px',sep=""))
         ),
         div(
           class='column',style='margin-left:15px',
-          div(class='row',style='overflow-y: auto;height: 230px',
+          div(class='row',style=paste('overflow-y: auto;height:',fitPlotHeight/2,'px;',sep=""),
               fit$description
           ),
           div(
@@ -1754,47 +1792,44 @@ function(input, output, session) {
           ),
         )
       )
-      
-      
     })
-    
-  })
+  }
   
-  # When user clicks linear plot
-  observeEvent(input$clickFitResultLinear,{
+  # When user clicks residual plot
+  observeEvent(input$clickFitResultNonlinearResiduals,{
     
-    .GlobalEnv$userClick <- input$clickFitResultLinear
+    .GlobalEnv$userClick <- input$clickFitResultNonlinearResiduals
     
-    # Get linear plot data
-    linearPlot <- fit$linear
-    linearPlotData <- linearPlot$data
+    # Get residual plot data
+    residualPlot <- fit$residuals
+    residualPlotData <- residualPlot$data
     
     # Get x and y
-    x <- linearPlotData$r2_minus_r0_over_2
-    y <- linearPlotData$ln_A_minus_offset_over_A0
+    x <- residualPlotData$r-residualPlotData$r0
+    y <- residualPlotData$Ar-residualPlotData$pAr
     
     # Get errs
     errs <- sqrt((userClick$x-x)^2+(userClick$y-y)^2)
-    nearestPoint <- linearPlotData[which(errs==min(errs,na.rm=TRUE)),]
+    nearestPoint <- residualPlotData[which(errs==min(errs,na.rm=TRUE)),]
     
     # Get sector data
-    sectorData <- subset(linearPlotData,ID==nearestPoint$ID)
+    sectorData <- subset(residualPlotData,ID==nearestPoint$ID)
     
     # Rerender plot with nearest point
-    newPlot <- linearPlot+
-      geom_point(data=nearestPoint,aes(x=r2_minus_r0_over_2,
-                                       y=ln_A_minus_offset_over_A0),
+    newPlot <- residualPlot+
+      geom_point(data=nearestPoint,aes(x=r-r0,
+                                       y=Ar-pAr),
                  col='blue',size=4)+
       geom_label(data=nearestPoint,aes(x=-Inf,
-                                      y=Inf),
-                label=paste("Scan ",
-                            nearestPoint$AbsoluteScan,
-                            " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
-                            '\n(',round(nearestPoint$r2_minus_r0_over_2,3),
-                            ', ',round(nearestPoint$ln_A_minus_offset_over_A0,3),')',
-                            sep=""),col='black',hjust=0,vjust=1,fontface='bold')
+                                       y=Inf),
+                 label=paste("Scan ",
+                             nearestPoint$AbsoluteScan,
+                             " Sector ",paste(round(min(sectorData$r),3),' - ',round(max(sectorData$r),3),sep=""),
+                             "\n(",round(nearestPoint$r,3),
+                             ", ",round(nearestPoint$Ar-nearestPoint$offset,3),")",
+                             sep=""),col='black',hjust=0,vjust=1,fontface='bold')
     
-    output$linearPlot <- renderPlot(newPlot,width=325,height=300)
+    output$residualPlot <- renderPlot(newPlot,width=fitPlotWidth,height=fitPlotHeight)
     
   })
   
@@ -1803,7 +1838,7 @@ function(input, output, session) {
     
     .GlobalEnv$userClick <- input$clickFitResultNonlinear
     
-    # Get linear plot data
+    # Get nonlinear plot data
     nonlinearPlot <- fit$nonlinear
     nonlinearPlotData <- nonlinearPlot$data
     
@@ -1832,13 +1867,14 @@ function(input, output, session) {
                             ", ",round(nearestPoint$Ar-nearestPoint$offset,3),")",
                             sep=""),col='black',hjust=0,vjust=1,fontface='bold')
     
-    output$nonlinearPlot <- renderPlot(newPlot,width=640,height=230)
+    output$nonlinearPlot <- renderPlot(newPlot,width=fitPlotWidth,height=fitPlotHeight)
     
   })
   
   # Reset plots
   observeEvent(input$resetFitPlots,{
-    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=640,height=230)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=fitPlotWidth,height=fitPlotHeight)
+    output$residualPlot <- renderPlot(fit$residuals,width=fitPlotWidth,height=fitPlotHeight)
     #output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
   })
   
