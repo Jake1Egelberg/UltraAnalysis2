@@ -1467,7 +1467,8 @@ function(input, output, session) {
           Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
           data=globalData,
           algorithm='lm',
-          start=START_STRING
+          start=START_STRING,
+          control=gsl_nls_control(maxiter=1000)
         )
       "
       

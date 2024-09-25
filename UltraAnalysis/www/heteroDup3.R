@@ -224,6 +224,7 @@ globalData <- lapply(1:parmArrayLength,function(x){
   tmp$ID <- x
   return(tmp)
 }) %>% bind_rows()
+plot(globalData$r,globalData$Ar)
 
 # Select fit data
 fitData <- globalData %>% select(
@@ -285,7 +286,7 @@ if(modelType=='MW / Single ideal species'){
     }
   "
   
-  fitData$Mb <- 20000
+  fitData$Mb <- 24469
   fitData$N <- 2
   
 }
@@ -323,7 +324,8 @@ fitString <- "
     Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
     data=fitData,
     algorithm='lm',
-    start=START_STRING
+    start=START_STRING,
+    control=gsl_nls_control(maxiter=1000)
   )
 "
 
@@ -347,3 +349,188 @@ ggplot(fitData,aes(x=r))+
   theme_prism()
 
 sum
+
+
+
+
+readScans <- function(file,filenames){
+  
+  # Read each scan
+  readAScan <- function(x,file,filenames){
+    
+    row <- file[x]
+    filename <- filenames[x]
+    
+    # Read data
+    scanLines <- read.table(row,header=TRUE,sep="\t")
+    
+    # Get scan name
+    scanName <- names(scanLines)
+    
+    # Extract metadata
+    rawMeta <- scanLines[1,]
+    metaVec <- unlist(strsplit(rawMeta," "))
+    
+    cellNumber <- as.numeric(metaVec[2])
+    temp <- as.numeric(metaVec[3])+273.15
+    rpm <- as.numeric(metaVec[4])
+    w <- (rpm/60)*2*pi
+    
+    # Get only values
+    valueLines <- scanLines[-1,]
+    
+    # Split values
+    splitValues <- strsplit(valueLines," ")
+    
+    # Remove blanks from split values
+    # IMPORTANT, negative values and positive values have differnt indices before blanks removed
+    noBlanks <- lapply(splitValues,function(x){
+      blankInds <- which(x=="")
+      if(length(blankInds)>0){
+        return(x[-blankInds])
+      } else{
+        return(x)
+      }
+    })
+    
+    # Extract values
+    radialPosition <- unlist(lapply(noBlanks,'[[',1))
+    absorbance <- unlist(lapply(noBlanks,'[[',2))
+    noise <- unlist(lapply(noBlanks,'[[',3))
+    
+    R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
+    
+    # Get scan number
+    scanNum <- as.numeric(str_remove_all(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1),'[:alpha:]|[:punct:]'))
+    
+    # Create df
+    dfValues <- data.frame(
+      Name = NA,
+      Cell = cellNumber,
+      Speed = rpm,
+      Scan = x,
+      AbsoluteScan = scanNum,
+      CellScanSpeed = NA,
+      r = radialPosition,
+      Ar = absorbance,
+      r0=NA,
+      w = w,
+      temp = temp,
+      R = R,
+      theta = w^2 / (2*R*temp),
+      Noise=noise
+    ) %>% mutate_all(as.numeric)
+    dfValues$Name <- scanName
+    dfValues$File <- file[x]
+    dfValues$CellScanSpeed <- paste("Cell ",cellNumber," Scan ",scanNum," ",rpm," rpm",sep="")
+    
+    naInds <- which(is.na(dfValues$Ar))
+    if(length(naInds)>0){
+      curatedValues <- dfValues[-naInds,]
+    } else{
+      curatedValues <- dfValues
+    }
+    
+    return(curatedValues)
+    
+  }
+  out <- lapply(1:length(file),readAScan,file=file,filenames=filenames)
+  
+  # Get scan names
+  scanNames <- lapply(out,'[[','AbsoluteScan')%>%unlist()%>%unique()
+  names(out) <- scanNames
+  
+  return(out)
+  
+}
+# Process kyles data
+paths <- c(
+  'C:/1_Documents/Ferguson Lab/AUC Data/TGFa - Copy/00005.RA2',
+  'C:/1_Documents/Ferguson Lab/AUC Data/TGFa - Copy/00011.RA2',
+  'C:/1_Documents/Ferguson Lab/AUC Data/TGFa - Copy/00015.RA2'
+)
+
+scan5 <- readScans(paths[1],'00005.RA2')[[1]]
+scan11 <- readScans(paths[2],'00011.RA2')[[1]]
+scan15 <- readScans(paths[3],'00015.RA2')[[1]]
+
+# Subset out ranges
+scan5sector1 <- subset(scan5,r>=5.924&r<=6.057)
+scan5sector2 <- subset(scan5,r>=6.404&r<=6.513)
+scan5sector3 <- subset(scan5,r>=6.94&r<=7.068)
+
+scan11sector1 <- subset(scan11,r>=5.967&r<=6.094)
+scan11sector2 <- subset(scan11,r>=6.409&r<=6.526)
+scan11sector3 <- subset(scan11,r>=6.918&r<=7.059)
+
+scan15sector1 <- subset(scan15,r>=6.367&r<=6.499)
+scan15sector2 <- subset(scan15,r>=6.985&r<=7.115)
+
+# Create secotr list
+rawscanList <- list(
+  scan5sector1,
+  scan5sector2,
+  scan5sector3,
+  scan11sector1,
+  scan11sector2,
+  scan11sector3,
+  scan15sector1,
+  scan15sector2
+)
+
+# Save each file as a .RA2 file for loading in hetero to check
+lapply(rawscanList,function(x){
+  
+  name <- "TGFa"
+  
+  if(unique(x$AbsoluteScan)==5){
+    headerString <- 'R 2 20.0 04000 0067906 1.1970E10 496 5' 
+  } else if(unique(x$AbsoluteScan)==11){
+    headerString <- 'R 2 20.0 06000 0131548 3.5150E10 496 5'
+  } else if(unique(x$AbsoluteScan)==15){
+    headerString <- 'R 2 20.0 09000 0186174 8.0320E10 480 5'
+  }
+  
+  # Get data
+  dataToSave <- select(x,c('r','Ar','Noise'))
+  dataToSave$Blank <- ''
+  dataToSave <- dataToSave[,c(4,1,2,3)]
+  
+  # Save
+  newFile <- gsub('.RA2','_sub.RA2',unique(x$File))
+  
+  write.table(
+    name,
+    newFile,
+    sep='\t',
+    quote=FALSE,
+    row.names = FALSE,
+    col.names=FALSE
+  )
+  
+  write.table(
+    headerString,
+    newFile,
+    sep='\t',
+    quote=FALSE,
+    row.names = FALSE,
+    col.names=FALSE,
+    append=TRUE
+  )
+  
+  write.table(
+    dataToSave,
+    newFile,
+    sep='\t',
+    quote=FALSE,
+    row.names = FALSE,
+    col.names=FALSE,
+    append=TRUE
+  )
+  
+})
+
+
+
+
+
