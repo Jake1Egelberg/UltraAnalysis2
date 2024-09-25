@@ -1325,11 +1325,11 @@ function(input, output, session) {
       } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
         
         # Get fit-specific inputs
-        mwValue <- tryCatch(as.numeric(input$mwInput),error=function(e)return(80000))
+        mwValue <- tryCatch(as.numeric(input$mwInput),error=function(e)return(as.numeric(dataList$mwValue)))
         mwValue <- ifelse(is.na(mwValue),80000,mwValue)
-        eCoefValue <- tryCatch(as.numeric(input$eCoefInput),error=function(e)return(76000))
+        eCoefValue <- tryCatch(as.numeric(input$eCoefInput),error=function(e)return(as.numeric(dataList$eCoefValue)))
         eCoefValue <- ifelse(is.na(eCoefValue),76000,eCoefValue)
-        nValue <- tryCatch(as.numeric(input$nInput),error=function(e)return(2))
+        nValue <- tryCatch(as.numeric(input$nInput),error=function(e)return(as.numeric(dataList$nValue)))
         nValue <- ifelse(is.na(nValue),2,nValue)
 
         # Update datalist
@@ -1508,10 +1508,42 @@ function(input, output, session) {
     # Create function to plot residuals
     .GlobalEnv$plotNonlinearResiduals <- function(globalFitDup){
       
+      # Calculate residuals
+      globalFitDup$residuals <- globalFitDup$Ar - globalFitDup$pAr
       
-      residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=Ar-pAr,col=as.character(ID)))+
-        geom_point()+
+      # Check residuals for outliars
+      resVec <- globalFitDup$residuals
+      resH <- IQR(resVec)*1.5
+      resMin <- quantile(resVec,0.25)[[1]] - resH
+      resMax <- quantile(resVec,0.75)[[1]] + resH
+      
+      # Label outliars
+      outliarInds <- which(resVec>resMax|resVec<resMin)
+      globalFitDup$Outliar <- "F"
+      if(length(outliarInds)>0){
+        globalFitDup[outliarInds,]$Outliar <-'T' 
+        
+        # Warn user
+        outliarString <- paste("<b>Warning</b>: ",length(outliarInds)," outliar residuals detected. Consider removing outliars to improve fitting.",sep="")
+        tryCatch(updateLog(outliarString),error=function(e)return())
+      }
+      
+      # Check that residuals are normally distributed
+      # pValues <- lapply(1:100,function(x){
+      #   compData <- rnorm(length(resVec),mean(resVec),sd(resVec))
+      #   normalTest <- ks.test(resVec,compData)
+      #   return(normalTest$p.value)
+      # }) %>% unlist()
+      # meanp <- mean(pValues)
+      # if(meanp<0.05){
+      #   residualDistString <- "<b>Warning</b>: residuals are not normally distributed. This may indicate poor fitting."
+      #   tryCatch(updateLog(residualDistString),error=function(e)return())
+      # }
+      
+      residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=residuals,col=as.character(ID)))+
+        geom_point(shape=ifelse(globalFitDup$Outliar=="T",1,16))+
         geom_hline(yintercept=0,col='red')+
+        ylab("Ar - pAr")+
         theme_prism()+
         theme(legend.position = 'none')
       
@@ -1728,7 +1760,7 @@ function(input, output, session) {
     # Report processing time
     timeDiff <- as.numeric(difftime(endTime,startTime,units='secs'))
     
-    timeString <- paste("Processed ",globalFit$convInfo$finIter," iterations fitting ",length(globalFit$dataClasses),' parameters in ',round(timeDiff,1),' seconds with ',globalFit$convInfo$trsName,'. Stop message: ',globalFit$convInfo$stopMessage,sep="")
+    timeString <- paste("Processed ",globalFit$convInfo$finIter," iterations fitting ",length(globalFit$m$getPars()),' parameters in ',round(timeDiff,1),' seconds with ',globalFit$convInfo$trsName,'. Stop message: ',globalFit$convInfo$stopMessage,sep="")
     tryCatch(updateLog(timeString),error=function(e)return())
     
     # Process fit results for plotting
