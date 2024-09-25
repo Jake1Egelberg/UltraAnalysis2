@@ -4,12 +4,6 @@
   Ar <- offset + A0 * exp(1)^( ( (Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
   return(Ar)
 }
-.GlobalEnv$AAtoA2 <- function(r, w, R, temp, r0, A0, Mb, KaA, offset){
-  monomerTerm <- A0 * exp(1)^( ( (Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
-  dimerTerm <- KaA * A0^2 * exp(1)^( ( (2*Mb*w^2)/(2*R*temp) )*(r^2 - r0^2) )
-  Ar <- offset + monomerTerm + dimerTerm
-  return(Ar)
-}
 
 # Read each scan
 .GlobalEnv$readScans <- function(file,filenames){
@@ -60,8 +54,8 @@
     R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
     
     # Get scan number
-    scanNum <- as.numeric(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1))
-   
+    scanNum <- as.numeric(str_remove_all(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1),'[:alpha:]|[:punct:]'))
+    
     # Create df
     dfValues <- data.frame(
       Name = NA,
@@ -157,7 +151,7 @@
 
 # Define model types
 .GlobalEnv$modelTypes <- c("MW / Single ideal species",
-                           "Kd / A + A <-> AA")
+                           "Kd / Monomer-Nmer")
 psv <- 0.71
 sd <- 1.003
 
@@ -756,6 +750,10 @@ function(input, output, session) {
       return()
     }
     
+    if(length(dataList$scansToAnalyze)==0){
+      return()
+    }
+    
     scanInd <- which(dataList$absoluteScanNumbers==dataList$selectedScan)
     currentScanData <- dataList$scanData[[scanInd]]
     
@@ -1217,10 +1215,11 @@ function(input, output, session) {
         div(class='column',
           actionButton('fitData','🏃 Run fit',style='align-self:center')
         )
-      } else if(selectedModel=='Kd / A + A <-> AA'){
+      } else if(selectedModel=='Kd / Monomer-Nmer'){
         div(class='column',
             textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
             textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
+            textInput('nInput',NULL,dataList$nValue,300,'N (mers)'),
             actionButton('fitData','🏃 Run fit',style='align-self:center')
           )
       }
@@ -1232,153 +1231,6 @@ function(input, output, session) {
     })
     
   })
-  
-  # Create function to fit single ideal species
-  fitSingleIdealSpecies <- function(baselineFits){
-    
-    # Define parms
-    
-    localParms <- c("A0","offset")
-    globalParms <- c("Mb")
-    
-    fitFunction <- "
-      function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
-        LOCAL_FIT_BOILERPLATE
-        
-        Ar <- (offset) + ( (A0) * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) ) )
-        
-        return(Ar)
-      }
-    "
-    
-    # Fit for MW
-    mwFit <-  gsl_nls(
-      Ar~singleIdealSpecies(r,w,R,temp,r0,A0,Mb,offset),
-      data=baselineFits,
-      algorithm='lm',
-      start=c(Mb=1)
-    )
-    
-    # Extract fitted Mb
-    mwFitSummary <- summarizeNLS(mwFit,dataList$selectedModel)
-    
-    # Update log
-    tryCatch(updateLog(mwFitSummary$summary),error=function(e){return()})
-    
-    # Get coef
-    Mb <- mwFitSummary$coefs[which(rownames(mwFitSummary$coefs)=="Mb"),]
-    
-    # Convert Mb to MW
-    mw <- (Mb$Estimate/(1-(dataList$psvValue*dataList$sd)))/1000
-    mwErr <- (Mb$`Std. Error`/Mb$Estimate)*mw
-    
-    # predict
-    preds <- predict(mwFit,baselineFits)
-    baselineFits$pAr <- preds
-    
-    # Calculate rsqr
-    meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
-    pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
-    rsqr <- 1-(pErr/meanErr)
-    
-    # Plot non linear fit
-    nonlinear <- plotNonlinearFit(baselineFits)
-    
-    # Plot linear
-    linearFit <- lm(ln_A_minus_offset_over_A0~r2_minus_r0_over_2,data=baselineFits)
-    baselineFits$linearpAr <- predict(linearFit,baselineFits)
-    
-    linear <- plotLinearFit(baselineFits)
-    
-    parmRow <- div(
-      class='column',
-      p(HTML(paste("<b>MW</b> = ",round(mw,1)," +/- ",round(mwErr,1)," kDa",sep="")),class='body'),
-      p(HTML(paste("<b>Buoyant MW</b> = ",round(Mb$Estimate/1000,1)," +/- ",round(Mb$`Std. Error`/1000,1)," kDa",sep="")),class='body'),
-      p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
-    )
-    
-    # Return out list
-    outlist <- list()
-    outlist$linear <- linear
-    outlist$nonlinear <- nonlinear
-    outlist$data <- baselineFits
-    outlist$description <- parmRow
-    
-    return(outlist)
-  }
-  
-  # Create function to fit A + A <-> A2
-  fitAplusAequalsAA <- function(baselineFits){
-    
-    # Check vec
-    checkVec <- c(dataList$mwValue,dataList$eCoefValue)
-    if(length(checkVec)==0||sum(is.na(checkVec))>0){
-      updateLog('Invalid MW or Extinction Coefficient inputs. Unable to fit.')
-      return()
-    }
-    
-    # Calculate buoyant MW
-    mbValue <- dataList$mwValue*(1-(dataList$psv*dataList$sd))
-    baselineFits$Mb <- mbValue
-    
-    # Fit for Ka
-    kaFit <-  gsl_nls(
-      Ar~AAtoA2(r,w,R,temp,r0,A0,Mb,KaA,offset),
-      data=baselineFits,
-      algorithm='lm',
-      start=c(KaA=1),
-      lower=c(KaA=0.000001)
-    )
-    
-    # Extract Ka
-    kaFitSummary <-  summarizeNLS(kaFit,dataList$selectedModel)
-    
-    # Update log
-    tryCatch(updateLog(kaFitSummary$summary),error=function(e){return()})
-    
-    # Get coef
-    kaCoef <- kaFitSummary$coefs[which(rownames(kaFitSummary$coefs)=="KaA"),]
-    
-    # Convert KaA to Kd
-    Kd <- ((1/kaCoef$Estimate)*(2/dataList$eCoefValue))*1000000
-    
-    # For z = Ecoef/2 * Ka^-1 = c * x^a, dz/z = |a| * dx/x
-    KdErr <- 1 * (kaCoef$`Std. Error`/kaCoef$Estimate) * Kd
-    
-    # predict
-    preds <- predict(kaFit,baselineFits)
-    baselineFits$pAr <- preds
-    
-    # Calculate rsqr
-    meanErr <- sum((baselineFits$Ar-mean(baselineFits$Ar))^2)
-    pErr <- sum((baselineFits$Ar-baselineFits$pAr)^2)
-    rsqr <- 1-(pErr/meanErr)
-    
-    # Plot non linear fit
-    nonlinear <- plotNonlinearFit(baselineFits)
-    
-    # Plot linear
-    linearFit <- lm(ln_A_minus_offset_over_A0~r2_minus_r0_over_2,data=baselineFits)
-    baselineFits$linearpAr <- predict(linearFit,baselineFits)
-    linear <- plotLinearFit(baselineFits,TRUE)
-    
-    parmRow <- div(
-      class='column',
-      p(HTML(paste("<b>Kd</b> = ",round(Kd,2)," +/- ",round(KdErr,2)," uM",sep="")),class='body'),
-      p(HTML(paste("<b>KaA</b> = ",round(kaCoef$Estimate,3)," +/- ",round(kaCoef$`Std. Error`,3),sep="")),class='body'),
-      p(HTML(paste("<b>R^2</b> = ",round(rsqr,3),sep="")),class='body') 
-    )
-    
-    
-    # Return out list
-    outlist <- list()
-    outlist$linear <- linear
-    outlist$nonlinear <- nonlinear
-    outlist$data <- baselineFits
-    outlist$description <- parmRow
-    return(outlist)
-    
-  }
   
   # Create function to check for proper inputs before fitting
   checkForInputs <- function(){
@@ -1431,277 +1283,371 @@ function(input, output, session) {
     
   }
   
-  # Calculate reference radius for each sector
-  calculateReferenceRadius <- function(x,savedSectors,allScans,dataCols,addedParms){
-    
-    # Get sector
-    sector <- savedSectors[[x]]
-    
-    # Get data from scan
-    scanInd <- which(allScans==as.numeric(sector$Scan))
-    sectorScan <- dataList$scanData[[scanInd]]
-    
-    # Subset out sector
-    data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
-    
-    # Check that scan and sector match
-    checkScan <- data$AbsoluteScan[1]==sector$Scan
-    checkMinr <- min(data$r)==sector$Min
-    checkMaxr <- max(data$r)==sector$Max
-    
-    if(!checkScan||!checkMinr||!checkMaxr){
-      print(paste("In fit for baseline: data not subset for x = ",x,sep=""))
-      tryCatch(updateLog("<b>Fatal error:</b> data mismatch. Sector not properly subset."),error=function(e)return())
-      return(NA)
-    }
-    
-    # Add parms in added parms
-    if(length(addedParms)>0){
-      for(i in 1:length(addedParms)){
-        parm <- addedParms[i]
-        data[,names(parm)] <- as.numeric(parm)
-      } 
-    }
-    
-    # Define r0 reference radius as 2/3 down sector per hetero documentation
-    r0 <- (diff(range(data$r))*(2/3))+min(data$r)
-    data$r0 <- r0
-    
-    # Assign ID
-    data$ID <- x
-    
-    # Select only data that will be used in fits
-    fitData <- data %>% select(all_of(dataCols))
-    
-    # Return data
-    return(fitData)
-    
-  }
-  
-  # Function to dynamically generate function string from parms
-  processFitFunction <- function(fitFunction,globalData,dataCols,globalParms,localParms){
-    
-    # Define local fit boilerplate
-    localFitBoilerplate <- "
-      A0 <- lapply(paste('A0_',ID,sep=''),function(x){get(x)}) %>% unlist()
-      offset <- lapply(paste('offset_',ID,sep=''),function(x){get(x)}) %>% unlist()
-    "
-    
-    # Process inputs
-    dataColumnList <- paste(dataCols,collapse=',')
-    
-    globalParmListStart <- paste(globalParms,'=1',sep='',collapse=',')
-    
-    localParmList <- lapply(localParms,function(x){
-      vec<-rep(x,parmArrayLength)
-      new <- paste(vec,'_',1:length(dataList$savedSectors),sep="")
-      return(new)
-    }) %>% unlist()
-    localParmListCollapsed <- paste(localParmList,collapse=",")
-    localParmListStart <- paste(localParmList,'=1',sep='',collapse=',')
-    
-    startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
-    
-    # Substitute parameters into fit function
-    dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitFunction)
-    dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
-    dynamicFitFunction <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitFunction)
-    dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitFunction)
-    
-    # Load into real function
-    loadedFunction <- eval(parse(text=dynamicFitFunction))
-    
-    # Format the fit string
-    fitString <- "
-      gsl_nls(
-        Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
-        data=globalData,
-        algorithm='lm',
-        start=START_STRING
-      )
-    "
-    
-    # Configure parameters
-    dynamicFitString <- gsub('DATA_COLUMNS',dataColumnList,fitString)
-    dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitString)
-    dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitString)
-    dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
-   
-    # Format output list
-    out <- list()
-    out$fitFunction <- loadedFunction
-    out$fitString <- dynamicFitString
-    return(out)
-  }
-  
-  # Create function to plot nonlinear fit
-  plotNonlinearFit <- function(globalFitDup){
-    
-    nonlinear <- ggplot(globalFitDup,aes(x=r))+
-      geom_point(aes(y=Ar-offset))+
-      geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
-      theme_prism()
-    
-    tryCatch(print(nonlinear),
-             warning=function(w){
-               warningString <- paste("<b>Warning</b> in nonlinear plotting: ",w[[1]],sep="")
-               updateLog(warningString)
-               return()
-             })
-    
-    return(nonlinear)
-    
-  }
-  
-  # Create function to plot linear fit
-  plotLinearFit <- function(globalFitDup,showSimulation=FALSE){
-    
-    linear <- ggplot(globalFitDup,aes(x=r2_minus_r0_over_2))+
-      geom_point(aes(y=ln_A_minus_offset_over_A0))+
-      geom_line(aes(x=r2_minus_r0_over_2,y=linearpAr),col='red',lwd=1)+
-      xlab("(r^2 - r0^2) / 2")+
-      ylab("ln( (Ar - offset) / A0 )")+
-      theme_prism()
-    
-    # Predict if monomer
-    if(showSimulation==TRUE){
+    # Define function parameters
+    .GlobalEnv$defineFitParms <- function(){
       
-      monomerData <- singleIdealSpecies(r=globalFitDup$r,
+      if(dataList$selectedModel=='MW / Single ideal species'){
+        
+        dataCols <- c("r","r0","w","temp","Ar","R","ID")
+        localParms <- c("A0","offset")
+        globalParms <- c("Mb")
+        addedParms <- NULL
+        
+        fitFunction <- "
+          function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
+            LOCAL_FIT_BOILERPLATE
+            
+            Ar <- (offset) + ( (A0) * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) ) )
+            
+            return(Ar)
+          }
+        "
+        
+      } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
+        
+        # Get fit-specific inputs
+        mwValue <- tryCatch(as.numeric(input$mwInput),error=function(e)return(80000))
+        mwValue <- ifelse(is.na(mwValue),80000,mwValue)
+        eCoefValue <- tryCatch(as.numeric(input$eCoefInput),error=function(e)return(76000))
+        eCoefValue <- ifelse(is.na(eCoefValue),76000,eCoefValue)
+        nValue <- tryCatch(as.numeric(input$nInput),error=function(e)return(2))
+        nValue <- ifelse(is.na(nValue),2,nValue)
+
+        # Update datalist
+        updateDataList('mwValue',mwValue)
+        updateDataList('eCoefValue',eCoefValue)
+        updateDataList('nValue',nValue)
+        
+        dataCols <- c("r","r0","w","temp","Ar","R","Mb","N","ID")
+        localParms <- c("A0","offset")
+        globalParms <- c("K")
+        addedParms <- c("Mb" = mwValue*(1-(dataList$psvValue*dataList$sdValue)), # covnert MW to Mb
+                        "N" = nValue)
+        
+        fitFunction <- "
+          function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
+            LOCAL_FIT_BOILERPLATE
+          
+            theta <- w^2 / (2*R*temp)
+            monomerTerm <- A0 * exp(1)^( Mb * theta * (r^2 - r0^2) )
+            dimerTerm <-  N * K * A0^N * exp(1)^( N * Mb * theta * (r^2 - r0^2) )
+            Ar <- offset + monomerTerm + dimerTerm
+            
+            return(Ar)
+          }
+        "
+        
+      }
+      
+      
+      out <- list()
+      out$dataCols <- dataCols
+      out$localParms <- localParms
+      out$globalParms <- globalParms
+      out$addedParms <- addedParms
+      out$fitFunction <- fitFunction
+      
+      return(out)
+    }
+    
+    # Calculate reference radius for each sector
+    .GlobalEnv$calculateReferenceRadius <- function(x,savedSectors,allScans,fitParms){
+      
+      dataCols <- fitParms$dataCols
+      addedParms <- fitParms$addedParms
+      
+      # Get sector
+      sector <- savedSectors[[x]]
+      
+      # Get data from scan
+      scanInd <- which(allScans==as.numeric(sector$Scan))
+      sectorScan <- dataList$scanData[[scanInd]]
+      
+      # Subset out sector
+      data <- subset(sectorScan,r>=sector$Min&r<=sector$Max)
+      
+      # Check that scan and sector match
+      checkScan <- data$AbsoluteScan[1]==sector$Scan
+      checkMinr <- min(data$r)==sector$Min
+      checkMaxr <- max(data$r)==sector$Max
+      
+      if(!checkScan||!checkMinr||!checkMaxr){
+        print(paste("In fit for baseline: data not subset for x = ",x,sep=""))
+        tryCatch(updateLog("<b>Fatal error:</b> data mismatch. Sector not properly subset."),error=function(e)return())
+        return(NA)
+      }
+      
+      # Add parms in added parms
+      if(length(addedParms)>0){
+        for(i in 1:length(addedParms)){
+          parm <- addedParms[i]
+          data[,names(parm)] <- as.numeric(parm)
+        } 
+      }
+      
+      # Define r0 reference radius as 2/3 down sector per hetero documentation
+      r0 <- (diff(range(data$r))*(2/3))+min(data$r)
+      data$r0 <- r0
+      
+      # Assign ID
+      data$ID <- x
+      
+      # Select only data that will be used in fits
+      fitData <- data %>% select(all_of(dataCols))
+      
+      # Return data
+      return(fitData)
+      
+  }
+    
+    # Function to dynamically generate function string from parms
+    .GlobalEnv$processFitFunction <- function(fitParms,globalData){
+      
+      dataCols <- fitParms$dataCols
+      globalParms <- fitParms$globalParms
+      localParms <- fitParms$localParms
+      
+      # Define local fit boilerplate
+      localFitBoilerplate <- "
+        A0 <- lapply(paste('A0_',ID,sep=''),function(x){get(x)}) %>% unlist()
+        offset <- lapply(paste('offset_',ID,sep=''),function(x){get(x)}) %>% unlist()
+      "
+      
+      # Process inputs
+      dataColumnList <- paste(dataCols,collapse=',')
+      
+      globalParmListStart <- paste(globalParms,'=1',sep='',collapse=',')
+      
+      parmArrayLength <- length(dataList$savedSectors)
+      localParmList <- lapply(localParms,function(x){
+        vec<-rep(x,parmArrayLength)
+        new <- paste(vec,'_',1:parmArrayLength,sep="")
+        return(new)
+      }) %>% unlist()
+      localParmListCollapsed <- paste(localParmList,collapse=",")
+      localParmListStart <- paste(localParmList,'=1',sep='',collapse=',')
+      
+      startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
+      
+      # Substitute parameters into fit function
+      dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitParms$fitFunction)
+      dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
+      dynamicFitFunction <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitFunction)
+      dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitFunction)
+      
+      # Load into real function
+      loadedFunction <- eval(parse(text=dynamicFitFunction))
+      .GlobalEnv$loadedFunction <- loadedFunction
+      
+      # Format the fit string
+      fitString <- "
+        gsl_nls(
+          Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
+          data=globalData,
+          algorithm='lm',
+          start=START_STRING
+        )
+      "
+      
+      # Configure parameters
+      dynamicFitString <- gsub('DATA_COLUMNS',dataColumnList,fitString)
+      dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitString)
+      dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitString)
+      dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
+      
+      # Format output list
+      out <- list()
+      out$fitFunction <- loadedFunction
+      out$fitString <- dynamicFitString
+      out$localParmList <- localParmList
+      return(out)
+    }
+    
+    # Create function to plot nonlinear fit
+    .GlobalEnv$plotNonlinearFit <- function(globalFitDup){
+      
+      nonlinear <- ggplot(globalFitDup,aes(x=r))+
+        geom_point(aes(y=Ar-offset))+
+        geom_line(aes(y=pAr-offset,group=ID),col='red',lwd=1)+
+        theme_prism()
+      
+      tryCatch(print(nonlinear),
+               warning=function(w){
+                 warningString <- paste("<b>Warning</b> in nonlinear plotting: ",w[[1]],sep="")
+                 updateLog(warningString)
+                 return()
+               })
+      
+      return(nonlinear)
+      
+    }
+    
+    # Create function to plot residuals
+    .GlobalEnv$plotNonlinearResiduals <- function(globalFitDup){
+      
+      
+      residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=Ar-pAr))+
+        geom_point()+
+        geom_hline(yintercept=0,col='red')+
+        theme_prism()
+      
+      return(residualPlot)
+      
+    }
+    
+    # Create function to plot linear fit
+    .GlobalEnv$plotLinearFit <- function(globalFitDup,showSimulation=FALSE){
+      
+      linear <- ggplot(globalFitDup,aes(x=r2_minus_r0_over_2))+
+        geom_point(aes(y=ln_A_minus_offset_over_A0))+
+        geom_line(aes(x=r2_minus_r0_over_2,y=linearpAr),col='red',lwd=1)+
+        xlab("(r^2 - r0^2) / 2")+
+        ylab("ln( (Ar - offset) / A0 )")+
+        theme_prism()
+      
+      # Predict if monomer
+      if(showSimulation==TRUE){
+        
+        monomerData <- singleIdealSpecies(r=globalFitDup$r,
+                                          w=globalFitDup$w,
+                                          R=globalFitDup$R,
+                                          temp=globalFitDup$temp,
+                                          r0=globalFitDup$r0,
+                                          A0=globalFitDup$A0,
+                                          Mb=globalFitDup$Mb,
+                                          offset=globalFitDup$offset)
+        dimerData <- singleIdealSpecies(r=globalFitDup$r,
                                         w=globalFitDup$w,
                                         R=globalFitDup$R,
                                         temp=globalFitDup$temp,
                                         r0=globalFitDup$r0,
                                         A0=globalFitDup$A0,
-                                        Mb=globalFitDup$Mb,
+                                        Mb=(globalFitDup$Mb*2),
                                         offset=globalFitDup$offset)
-      dimerData <- singleIdealSpecies(r=globalFitDup$r,
-                                      w=globalFitDup$w,
-                                      R=globalFitDup$R,
-                                      temp=globalFitDup$temp,
-                                      r0=globalFitDup$r0,
-                                      A0=globalFitDup$A0,
-                                      Mb=(globalFitDup$Mb*2),
-                                      offset=globalFitDup$offset)
-      
-      globalFitDup$monomerSimulation <- monomerData
-      globalFitDup$dimerSimulation <- dimerData
-      
-      linear <- linear +
-        geom_line(data=globalFitDup,aes(x=r2_minus_r0_over_2,y=log((monomerSimulation-offset)/A0),color='Simulated Monomer',group=1),lwd=1)+
-        geom_line(data=globalFitDup,aes(x=r2_minus_r0_over_2,y=log((dimerSimulation-offset)/A0),color='Simulated Dimer',group=1),lwd=1)+
-        scale_color_manual(
-          values=c(
-            "Simulated Dimer"='goldenrod',
-            "Simulated Monomer"='firebrick'
-          )
-        )+
-        theme(legend.position='top')
-      
-    }
-    
-    tryCatch(print(linear),
-             warning=function(w){
-               warningString <- paste("<b>Warning</b> in linear plotting: ",w[[1]],sep="")
-               updateLog(warningString)
-               return()
-             })
-    
-    return(linear)
-    
-  }
-  
-  # Process fit results
-  processFitResults <- function(globalFit,globalData,localParmList,localParms,globalParms){
-    
-    # Extract fitted Mb
-    fitSummary <- summarizeNLS(globalFit,dataList$selectedModel)
-    parmRownames <- rownames(fitSummary$coefs)
-    
-    # Create copy of df to avoid modification
-    globalFitDup <- globalData
-    
-    # Update log
-    tryCatch(updateLog(fitSummary$summary),error=function(e){return()})
-    
-    # Add local and global parm columns to data
-    parmVector <- c(localParms,globalParms)
-    for(i in seq_along(parmVector)){
-      
-      parm <- parmVector[i]
-      globalFitDup[,parm] <- NA
-    }
-    
-    # Fill columns with data
-    allParms <- c(localParmList,globalParms)
-    for(i in seq_along(allParms)){
-      
-      # Get parm
-      parm <- allParms[i]
-      
-      # Extract coefficient
-      estimateInd <- which(parmRownames==parm)
-      
-      # Get relevant subset of data
-      parmSplit <- strsplit(parm,'_')[[1]]
-      
-      if(length(parmSplit)>1){
-        dataInd <- which(globalFitDup$ID==as.numeric(parmSplit[2])) 
-      } else{
-        dataInd <- 1:nrow(globalFitDup)
+        
+        globalFitDup$monomerSimulation <- monomerData
+        globalFitDup$dimerSimulation <- dimerData
+        
+        linear <- linear +
+          geom_line(data=globalFitDup,aes(x=r2_minus_r0_over_2,y=log((monomerSimulation-offset)/A0),color='Simulated Monomer',group=1),lwd=1)+
+          geom_line(data=globalFitDup,aes(x=r2_minus_r0_over_2,y=log((dimerSimulation-offset)/A0),color='Simulated Dimer',group=1),lwd=1)+
+          scale_color_manual(
+            values=c(
+              "Simulated Dimer"='goldenrod',
+              "Simulated Monomer"='firebrick'
+            )
+          )+
+          theme(legend.position='top')
+        
       }
-      parmType <- parmSplit[1]
       
-      # Add parm to df
-      globalFitDup[dataInd,parmType] <- fitSummary$coef$Estimate[estimateInd]
+      tryCatch(print(linear),
+               warning=function(w){
+                 warningString <- paste("<b>Warning</b> in linear plotting: ",w[[1]],sep="")
+                 updateLog(warningString)
+                 return()
+               })
+      
+      return(linear)
       
     }
     
-    # predict
-    preds <- predict(globalFit,globalFitDup)
-    globalFitDup$pAr <- preds
-    
-    # Calculate rsqr
-    meanErr <- sum((globalFitDup$Ar-mean(globalFitDup$Ar))^2)
-    pErr <- sum((globalFitDup$Ar-globalFitDup$pAr)^2)
-    rsqr <- 1-(pErr/meanErr)
-    
-    # Plot non linear fit
-    nonlinear <- plotNonlinearFit(globalFitDup)
-    
-    # Add data transformations for linear plotting
-    globalFitDup$r2_minus_r0_over_2 <- (globalFitDup$r^2 - globalFitDup$r0^2)/2
-    
-    # Calculate y axis so that minimum is 0.001, not 0 or below 0
-    untrans <- (globalFitDup$Ar-globalFitDup$offset)/globalFitDup$A0
-    
-    # Make minimum 0.001
-    trans <- tryCatch(log(untrans),
-                      warning=function(w){
-                        warningString <- paste("Warning in ln( (Ar - offset) / A0): ",w[[1]],sep="")
-                        tryCatch(updateLog(warningString),error=function(e)return())
-                        return(log(untrans))
-                      })
-    globalFitDup$ln_A_minus_offset_over_A0 <- trans
-    
-    # Plot linear
-    linearFit <- lm(ln_A_minus_offset_over_A0~r2_minus_r0_over_2,data=globalFitDup)
-    globalFitDup$linearpAr <- predict(linearFit,globalFitDup)
-    
-    linear <- plotLinearFit(globalFitDup,TRUE)
-    
-    parmRow <- renderTable(fitSummary$coefs)
-    
-    # Return out list
-    outlist <- list()
-    outlist$linear <- linear
-    outlist$nonlinear <- nonlinear
-    outlist$data <- globalFitDup
-    outlist$description <- parmRow
-    
-    return(outlist)
-    
-  }
+    # Process fit results
+    .GlobalEnv$processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms){
+      
+      localParms <- fitParms$localParms
+      globalParms <- fitParms$globalParms
+      
+      # Extract fitted Mb
+      fitSummary <- summarizeNLS(globalFit,dataList$selectedModel)
+      parmRownames <- rownames(fitSummary$coefs)
+      
+      # Create copy of df to avoid modification
+      globalFitDup <- globalData
+      
+      # Update log
+      tryCatch(updateLog(fitSummary$summary),error=function(e){return()})
+      
+      # Add local and global parm columns to data
+      parmVector <- c(localParms,globalParms)
+      for(i in seq_along(parmVector)){
+        
+        parm <- parmVector[i]
+        globalFitDup[,parm] <- NA
+      }
+      
+      # Fill columns with data
+      allParms <- c(processedFitFunction$localParmList,globalParms)
+      for(i in seq_along(allParms)){
+        
+        # Get parm
+        parm <- allParms[i]
+        
+        # Extract coefficient
+        estimateInd <- which(parmRownames==parm)
+        
+        # Get relevant subset of data
+        parmSplit <- strsplit(parm,'_')[[1]]
+        
+        if(length(parmSplit)>1){
+          dataInd <- which(globalFitDup$ID==as.numeric(parmSplit[2])) 
+        } else{
+          dataInd <- 1:nrow(globalFitDup)
+        }
+        parmType <- parmSplit[1]
+        
+        # Add parm to df
+        globalFitDup[dataInd,parmType] <- fitSummary$coef$Estimate[estimateInd]
+        
+      }
+      
+      # predict
+      preds <- predict(globalFit,globalFitDup)
+      globalFitDup$pAr <- preds
+      
+      # Calculate rsqr
+      meanErr <- sum((globalFitDup$Ar-mean(globalFitDup$Ar))^2)
+      pErr <- sum((globalFitDup$Ar-globalFitDup$pAr)^2)
+      rsqr <- 1-(pErr/meanErr)
+      
+      # Plot non linear fit
+      nonlinear <- plotNonlinearFit(globalFitDup)
+      residuals <- plotNonlinearResiduals(globalFitDup)
+      
+      # Format output based on model
+      if(dataList$selectedModel=='MW / Single ideal species'){
+        coefRow <- fitSummary$coefs[which(rownames(fitSummary$coefs)=='Mb'),]
+        displayedMW <- (coefRow$Estimate / (1-(dataList$psvValue*dataList$sdValue)))/1000
+        displayedMWErr <- (coefRow$`Std. Error` / (1-(dataList$psvValue*dataList$sdValue)))/1000
+        displayedText <- paste(
+          "MW = ",round(displayedMW,1)," +/- ",round(displayedMWErr,1)," kDa",sep=""
+        )
+      } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
+        coefRow <- fitSummary$coefs[which(rownames(fitSummary$coefs)=='K'),]
+        displayedKd <- ((1/coefRow$Estimate)*(2/dataList$eCoefValue))*1000000
+        displayedKdErr <- (coefRow$`Std. Error`/coefRow$Estimate)*displayedKd
+        displayedText <- paste(
+          "Kd = ",round(displayedKd,2)," +/- ",round(displayedKdErr,2)," uM",sep=""
+        )
+      }
+      
+      parmRow <- div(
+        p(HTML(displayedText),style='padding-left:10px;'),
+        renderTable(fitSummary$coefs,rownames = TRUE)
+      )
+      
+      # Return out list
+      outlist <- list()
+      outlist$nonlinear <- nonlinear
+      outlist$data <- globalFitDup
+      outlist$description <- parmRow
+      outlist$residuals <- residuals
+      
+      return(outlist)
+      
+    }
 
+  
   # When user tries to fit the data
   observeEvent(input$fitData,{
     
@@ -1721,58 +1667,16 @@ function(input, output, session) {
       updateDataList('selectedModel','MW / Single ideal species')
     }
     
-    if(dataList$selectedModel=='MW / Single ideal species'){
-      
-      dataCols <- c("r","r0","w","temp","Ar","R","ID")
-      localParms <- c("A0","offset")
-      globalParms <- c("Mb")
-      addedParms <- NULL
-      
-      fitFunction <- "
-        function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
-          LOCAL_FIT_BOILERPLATE
-          
-          Ar <- (offset) + ( (A0) * exp(1)^( ( (Mb*w^2)/(R*temp*2) )*(r^2 - r0^2) ) )
-          
-          return(Ar)
-        }
-      "
-      
-    } else if(dataList$selectedModel=='Kd / A + A <-> AA'){
-      
-      # Get fit-specific inputs
-      mwValue <- tryCatch(as.numeric(input$mwInput),error=function(e)return(80000))
-      eCoefValue <- tryCatch(as.numeric(input$eCoefInput),error=function(e)return(80000))
-      
-      # Update datalist
-      updateDataList('mwValue',mwValue)
-      updateDataList('eCoefValue',eCoefValue)
-      
-      dataCols <- c("r","r0","w","temp","Ar","R","Mb","N","ID")
-      localParms <- c("A0","offset")
-      globalParms <- c("K")
-      addedParms <- c("Mb" = mwValue*(1-(dataList$psvValue*dataList$sdValue)),
-                      "N" = ifelse(length(dataList$N)==0,2,dataList$N))
-      
-      fitFunction <- "
-        function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
-          LOCAL_FIT_BOILERPLATE
-        
-          theta <- w^2 / (2*R*temp)
-          monomerTerm <- A0 * exp(1)^( Mb * theta * (r^2 - r0^2) )
-          dimerTerm <-  N * K * A0^N * exp(1)^( N * Mb * theta * (r^2 - r0^2) )
-          Ar <- offset + monomerTerm + dimerTerm
-          
-          return(Ar)
-        }
-      "
-      
-    }
+    # Define parameters of fit
+      # Returns fit function among other things depending on selected model to fit
+    .GlobalEnv$fitParms <- defineFitParms()
     
-    # Fit baselines and combine all data for global fit
+    # Processes sector data per fit function, adding parms accordingly
     processedSectors <- lapply(1:length(savedSectors),
                                calculateReferenceRadius,
-                               savedSectors=savedSectors,allScans=allScans,dataCols=dataCols,addedParms=addedParms)
+                               savedSectors=savedSectors,
+                               allScans=allScans,
+                               fitParms=fitParms)
     
     if(length(which(is.na(processedSectors)))>0){
       print("Error in fitting baseline")
@@ -1782,19 +1686,21 @@ function(input, output, session) {
     
     # Combine into 1 global dataset
     globalData <- processedSectors %>% bind_rows()
-    
-    # Process parms, returns function used for fitting and string compiled for nl fit
-    processedFitFunction <- processFitFunction(fitFunction,globalData,dataCols,globalParms,localParms)
+
+    # Dynamically render fit function from parms
+    processedFitFunction <- processFitFunction(fitParms,globalData)
    
-    # Get fit
+    # Do fit
     globalFit <- eval(parse(text=processedFitFunction$fitString))
     
-    # Process fit results for display
-    fit <- processFitResults(globalFit,globalData,localParmList,localParms,globalParms)
+    # Process fit results for plotting
+    fit <- processFitResults(globalFit,globalData,processedFitFunction,fitParms)
+    dev.off()
     
     # Render plots as outputs
-    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=325,height=300)
-    output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=640,height=230)
+    output$residualPlot <- renderPlot(fit$residuals,width=640,height=140)
+    #output$linearPlot <- renderPlot(fit$linear,width=320,height=300)
     
     # Save fit to global env
     .GlobalEnv$fit <- fit
@@ -1826,15 +1732,12 @@ function(input, output, session) {
         class='row',
         div(
           class='column',style='width:fit-contents;margin-left:15px;',
-          plotOutput('nonlinearPlot',click='clickFitResultNonlinear',dblclick='resetFitPlots')
+          plotOutput('nonlinearPlot',click='clickFitResultNonlinear',dblclick='resetFitPlots',height = "230px"),
+          plotOutput('residualPlot')
         ),
         div(
-          class='column',style='width:fit-contents;margin-left:15px;',
-          plotOutput('linearPlot',click='clickFitResultLinear',dblclick='resetFitPlots')
-        ),
-        div(
-          class='column',style='width:fit-contents;margin-left:30px',
-          div(class='row',
+          class='column',style='margin-left:15px',
+          div(class='row',style='overflow-y: auto;height: 230px',
               fit$description
           ),
           div(
@@ -1929,14 +1832,14 @@ function(input, output, session) {
                             ", ",round(nearestPoint$Ar-nearestPoint$offset,3),")",
                             sep=""),col='black',hjust=0,vjust=1,fontface='bold')
     
-    output$nonlinearPlot <- renderPlot(newPlot,width=325,height=300)
+    output$nonlinearPlot <- renderPlot(newPlot,width=640,height=230)
     
   })
   
   # Reset plots
   observeEvent(input$resetFitPlots,{
-    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=325,height=300)
-    output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
+    output$nonlinearPlot <- renderPlot(fit$nonlinear,width=640,height=230)
+    #output$linearPlot <- renderPlot(fit$linear,width=325,height=300)
   })
   
 }
