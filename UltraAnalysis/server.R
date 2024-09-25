@@ -1466,7 +1466,7 @@ function(input, output, session) {
         gsl_nls(
           Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
           data=globalData,
-          algorithm='lm',
+          algorithm='lmaccel',
           start=START_STRING,
           control=gsl_nls_control(maxiter=1000)
         )
@@ -1721,7 +1721,15 @@ function(input, output, session) {
     processedFitFunction <- processFitFunction(fitParms,globalData)
    
     # Do fit
+    startTime <- Sys.time()
     globalFit <- eval(parse(text=processedFitFunction$fitString))
+    endTime <- Sys.time()
+    
+    # Report processing time
+    timeDiff <- as.numeric(difftime(endTime,startTime,units='secs'))
+    
+    timeString <- paste("Processed ",globalFit$convInfo$finIter," iterations fitting ",length(globalFit$dataClasses),' parameters in ',round(timeDiff,1),' seconds with ',globalFit$convInfo$trsName,'. Stop message: ',globalFit$convInfo$stopMessage,sep="")
+    tryCatch(updateLog(timeString),error=function(e)return())
     
     # Process fit results for plotting
     fit <- processFitResults(globalFit,globalData,processedFitFunction,fitParms)
