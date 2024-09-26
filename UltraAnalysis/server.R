@@ -1511,8 +1511,10 @@ function(input, output, session) {
       # Calculate residuals
       globalFitDup$residuals <- globalFitDup$Ar - globalFitDup$pAr
       
+      # Get residuals vector ordered by r-r0 to mirror plot
+      resVec <- globalFitDup$residuals[order((globalFitDup$r-globalFitDup$r0),decreasing=FALSE)]
+      
       # Check residuals for outliars
-      resVec <- globalFitDup$residuals
       resH <- IQR(resVec)*1.5
       resMin <- quantile(resVec,0.25)[[1]] - resH
       resMax <- quantile(resVec,0.75)[[1]] + resH
@@ -1528,7 +1530,21 @@ function(input, output, session) {
         tryCatch(updateLog(outliarString),error=function(e)return())
       }
       
-      # Check that residuals are normally distributed
+      # Split residuals into groups of 10
+      chunkLength <- 10
+      groups <- split(resVec,ceiling(seq_along(resVec) / chunkLength) )
+      
+      # Remove groups with too few points
+      lengths <- lapply(groups,length) %>% unlist()
+      groupsCur <- groups[!lengths<chunkLength]
+      
+      # For each group, get number of points above 0 (should be 0.5)
+      pointsAboveZero <- lapply(groupsCur,function(x){length(which(x>0))}) %>% unlist()
+      fractionAboveZero <- pointsAboveZero/chunkLength
+      
+      # Check if fractions are uniformally distributed
+      uniformTest <- ks.test(fractionAboveZero,'runif',n=100)
+      
       # pValues <- lapply(1:100,function(x){
       #   compData <- rnorm(length(resVec),mean(resVec),sd(resVec))
       #   normalTest <- ks.test(resVec,compData)
