@@ -65,6 +65,8 @@ defineFitParms <- function(input){
     dataCols <- c("r","r0","w","temp","Ar","R","ID")
     localParms <- c("A0","offset")
     globalParms <- c("Mb")
+    lowerParms <- c('Mb'=0)
+    upperParms <- c("Mb"=10000)
     addedParms <- NULL
     
     fitFunction <- "
@@ -95,6 +97,8 @@ defineFitParms <- function(input){
     dataCols <- c("r","r0","w","temp","Ar","R","Mb","N","ID")
     localParms <- c("A0","offset")
     globalParms <- c("K")
+    lowerParms <- c("K"=0)
+    upperParms <- c("K"=100)
     addedParms <- c("Mb" = mwValue*(1-(dataList$psvValue*dataList$sdValue)), # covnert MW to Mb
                     "N" = nValue)
     
@@ -120,6 +124,8 @@ defineFitParms <- function(input){
   out$globalParms <- globalParms
   out$addedParms <- addedParms
   out$fitFunction <- fitFunction
+  out$lowerParms <- lowerParms
+  out$upperParms <- upperParms
   
   return(out)
 }
@@ -206,6 +212,10 @@ processFitFunction <- function(fitParms,globalData){
   
   startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
   
+  lowerString <- paste('c("',paste(names(fitParms$lowerParms),'"=',as.numeric(fitParms$lowerParms),sep=""),")",sep="")
+  
+  upperString <- paste('c("',paste(names(fitParms$upperParms),'"=',as.numeric(fitParms$upperParms),sep=""),")",sep="")
+  
   # Substitute parameters into fit function
   dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitParms$fitFunction)
   dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
@@ -232,6 +242,8 @@ processFitFunction <- function(fitParms,globalData){
   dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitString)
   dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitString)
   dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
+  dynamicFitString <- gsub('LOWER_STRING',lowerString,dynamicFitString)
+  dynamicFitString <- gsub('UPPER_STRING',upperString,dynamicFitString)
   
   # Format output list
   out <- list()

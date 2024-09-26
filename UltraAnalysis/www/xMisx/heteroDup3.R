@@ -16,7 +16,7 @@ mwFunction <- function(r, w, temp, r0, R, A0, Mb, offset){
 R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
 
 selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
-selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
+#selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
 
 # Read selected log file
 readLogFile <- function(selectedCells){
@@ -286,7 +286,7 @@ if(modelType=='MW / Single ideal species'){
     }
   "
   
-  fitData$Mb <- 24469
+  fitData$Mb <- 20000
   fitData$N <- 2
   
 }
@@ -325,7 +325,8 @@ fitString <- "
     data=fitData,
     algorithm='lm',
     start=START_STRING,
-    control=gsl_nls_control(maxiter=1000)
+    control=gsl_nls_control(maxiter=1000),
+    lower=c(K=0)
   )
 "
 
