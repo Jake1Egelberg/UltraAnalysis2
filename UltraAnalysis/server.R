@@ -1512,7 +1512,7 @@ function(input, output, session) {
       globalFitDup$residuals <- globalFitDup$Ar - globalFitDup$pAr
       
       # Get residuals vector ordered by r-r0 to mirror plot
-      resVec <- globalFitDup$residuals[order((globalFitDup$r-globalFitDup$r0),decreasing=FALSE)]
+      resVec <- globalFitDup$residuals
       
       # Check residuals for outliars
       resH <- IQR(resVec)*1.5
@@ -1530,9 +1530,12 @@ function(input, output, session) {
         tryCatch(updateLog(outliarString),error=function(e)return())
       }
       
+      # Order resvec for distribution test
+      resVecOrdered <- resVec[order((globalFitDup$r-globalFitDup$r0),decreasing=FALSE)]
+      
       # Split residuals into groups of 10
       chunkLength <- 10
-      groups <- split(resVec,ceiling(seq_along(resVec) / chunkLength) )
+      groups <- split(resVecOrdered,ceiling(seq_along(resVecOrdered) / chunkLength) )
       
       # Remove groups with too few points
       lengths <- lapply(groups,length) %>% unlist()
@@ -1542,19 +1545,27 @@ function(input, output, session) {
       pointsAboveZero <- lapply(groupsCur,function(x){length(which(x>0))}) %>% unlist()
       fractionAboveZero <- pointsAboveZero/chunkLength
       
-      # Check if fractions are uniformally distributed
-      uniformTest <- ks.test(fractionAboveZero,'runif',n=100)
+      # Simulate what value should be with uniform distirbution
+      # uniformRes <- runif(10000,-1,1)
+      # uniformResGroups <- split(uniformRes,ceiling(seq_along(uniformRes)/chunkLength))
+      # unifAboveZero <- lapply(uniformResGroups,function(x){length(which(x>0))}) %>% unlist()
+      # unifFractionAboveZero <- unifAboveZero/chunkLength
+      # # Calculate threshholds from simulation
+      # zScore <- 1.96
+      # maxThresh <- mean(unifFractionAboveZero) + zScore*sd(unifFractionAboveZero) # about 0.8
+      # minThresh <- mean(unifFractionAboveZero) - zScore*sd(unifFractionAboveZero) # about 0.2
+
+      # Calculate how many points are significantly greater or less than 0.5
+      fractionHigh <- length(which(fractionAboveZero>0.8))/length(fractionAboveZero)
+      fractionLow <- length(which(fractionAboveZero<0.2))/length(fractionAboveZero)
       
-      # pValues <- lapply(1:100,function(x){
-      #   compData <- rnorm(length(resVec),mean(resVec),sd(resVec))
-      #   normalTest <- ks.test(resVec,compData)
-      #   return(normalTest$p.value)
-      # }) %>% unlist()
-      # meanp <- mean(pValues)
-      # if(meanp<0.05){
-      #   residualDistString <- "<b>Warning</b>: residuals are not normally distributed. This may indicate poor fitting."
-      #   tryCatch(updateLog(residualDistString),error=function(e)return())
-      # }
+      # Sum should be less than 0.05, doing 0.1 for less stringent thresh
+      sumOfFractions <- fractionLow + fractionHigh
+      
+      if(sumOfFractions>0.1){
+        improperResidualDist<- "<b>Warning</b>: Residuals do not appear randomly distributed around the fit. This suggests an invalid fit."
+       tryCatch(updateLog(improperResidualDist),error=function(e)return())
+      }
       
       residualPlot <- ggplot(globalFitDup,aes(x=r-r0,y=residuals,col=as.character(ID)))+
         geom_point(shape=ifelse(globalFitDup$Outliar=="T",1,16))+
@@ -1681,6 +1692,8 @@ function(input, output, session) {
       meanErr <- sum((globalFitDup$Ar-mean(globalFitDup$Ar))^2)
       pErr <- sum((globalFitDup$Ar-globalFitDup$pAr)^2)
       rsqr <- 1-(pErr/meanErr)
+      
+      .GlobalEnv$globalFitDup <- globalFitDup
       
       # Plot non linear fit
       nonlinear <- plotNonlinearFit(globalFitDup)
