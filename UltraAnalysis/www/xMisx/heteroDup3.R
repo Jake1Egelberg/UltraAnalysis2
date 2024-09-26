@@ -15,8 +15,8 @@ mwFunction <- function(r, w, temp, r0, R, A0, Mb, offset){
 # Correct gas constant to units of (g * cm^2) / s^2 * mol * K
 R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
 
-selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
-#selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
+#selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
+selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
 
 # Read selected log file
 readLogFile <- function(selectedCells){
@@ -205,7 +205,10 @@ s2sub <- subset(s2,r>5.9&r<6.1)
 
 # Format list
 rawscanList <- list(s1sub,
-                    s2sub
+                    s2sub,
+                    s1sub,
+                    s2sub,
+                    s1sub
                     )
 
 # calculate reference radii
@@ -243,10 +246,23 @@ modelType <- c("MW / Single ideal species",
                "Kd / A + A <-> AA")[2]
 
 # Define local fit boilerplate
+
+# Create ifelse chain for alternative method
+A0IfElse <- lapply(1:parmArrayLength,function(x){
+  paste('ifelse(ID==',x,",A0",x,",",sep="")
+}) %>% unlist() %>% paste(collapse='') %>% paste('NA',paste(rep(')',parmArrayLength),collapse=''),sep="")
+offsetIfElse <- lapply(1:parmArrayLength,function(x){
+  paste('ifelse(ID==',x,",offset",x,",",sep="")
+}) %>% unlist() %>% paste(collapse='') %>% paste('NA',paste(rep(')',parmArrayLength),collapse=''),sep="")
+
+
 localFitBoilerplate <- "
   A0 <- lapply(paste('A0',ID,sep=''),function(x){get(x)}) %>% unlist()
   offset <- lapply(paste('offset',ID,sep=''),function(x){get(x)}) %>% unlist()
 "
+
+# Using chain of ifelse doesnt seem any faster
+#localFitBoilerPlate <- paste("A0 = ",A0IfElse,"\noffset = ",offsetIfElse,sep="")
 
 
 if(modelType=='MW / Single ideal species'){
@@ -265,7 +281,7 @@ if(modelType=='MW / Single ideal species'){
     }
   "
   
-  fitData$Mb <- NA
+  fitData$Mb <- NULL
   
 } else if(modelType=='Kd / A + A <-> AA'){
   
@@ -325,8 +341,7 @@ fitString <- "
     data=fitData,
     algorithm='lm',
     start=START_STRING,
-    control=gsl_nls_control(maxiter=1000),
-    lower=c(K=0)
+    control=gsl_nls_control(maxiter=1000)
   )
 "
 
@@ -337,7 +352,9 @@ dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitStr
 dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
 
 # Do fit
+time1 <- Sys.time()
 globalFit <- eval(parse(text=dynamicFitString))
+time2 <- Sys.time()
 
 # Get summary
 sum <- summary(globalFit)
@@ -351,8 +368,9 @@ ggplot(fitData,aes(x=r))+
 
 sum
 
-
-
+# Print time
+procTime <- as.numeric(difftime(time2,time1,units='secs'))
+print(paste("Fit in ",round(procTime,3),'s',sep=""))
 
 readScans <- function(file,filenames){
   
