@@ -5,85 +5,68 @@ readScans <- function(file,filenames){
   # Read each scan
   readAScan <- function(x,file,filenames){
     
-    row <- file[x]
+    tmpFile <- file[x]
     filename <- filenames[x]
     
-    # Read data
-    scanLines <- read.table(row,header=TRUE,sep="\t")
-    
-    # Get scan name
-    scanName <- names(scanLines)
-    
     # Extract metadata
-    rawMeta <- scanLines[1,]
-    metaVec <- unlist(strsplit(rawMeta," "))
-    
-    cellNumber <- as.numeric(metaVec[2])
-    temp <- as.numeric(metaVec[3])+273.15
-    rpm <- as.numeric(metaVec[4])
+    metaData <- read_lines(tmpFile,n_max=2)
+    scanName <- metaData[1]
+    metaDf <- metaData[2] %>%
+      strsplit(' ') %>%
+      unlist() %>%
+      as.matrix() %>% 
+      t() %>%
+      `colnames<-`(c("uk1","Cell","Celcius","Rpm","Seconds","w_squared_times_t","uk2",'uk3')) %>%
+      as.data.frame() %>%
+      mutate(across(-1,as.numeric)) %>%
+      as_tibble()
+    cellNumber <- metaDf$Cell
+    temp <- metaDf$Celcius+273.15
+    rpm <- metaDf$Rpm
     w <- (rpm/60)*2*pi
     
-    # Get only values
-    valueLines <- scanLines[-1,]
+    # Read data as tibble
+    scanData <- read_lines(tmpFile,skip=2)
+    scanDf <- scanData %>%
+      str_squish() %>%
+      read_table(col_names=c('r',"Ar",'noise'))
     
-    # Split values
-    splitValues <- strsplit(valueLines," ")
-    
-    # Remove blanks from split values
-    # IMPORTANT, negative values and positive values have differnt indices before blanks removed
-    noBlanks <- lapply(splitValues,function(x){
-      blankInds <- which(x=="")
-      if(length(blankInds)>0){
-        return(x[-blankInds])
-      } else{
-        return(x)
-      }
-    })
-    
-    # Extract values
-    radialPosition <- unlist(lapply(noBlanks,'[[',1))
-    absorbance <- unlist(lapply(noBlanks,'[[',2))
-    noise <- unlist(lapply(noBlanks,'[[',3))
-    
+    # Define gas constant with proper units
     R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
     
     # Get scan number
-    scanNum <- as.numeric(str_remove_all(str_sub(filename,end=str_locate(filename,'\\.')[[1]]-1),'[:alpha:]|[:punct:]'))
+    scanNum <- filename %>%
+      str_sub(end=str_locate(filename,'\\.')[[1]]-1) %>%
+      str_remove_all('[:alpha:]|[:punct:]') %>%
+      as.numeric()
     
     # Create df
-    dfValues <- data.frame(
-      Name = NA,
+    dfValues <- tibble(
+      Name = scanName,
       Cell = cellNumber,
       Speed = rpm,
       Scan = x,
       AbsoluteScan = scanNum,
-      CellScanSpeed = NA,
-      r = radialPosition,
-      Ar = absorbance,
+      CellScanSpeed = paste("Cell ",cellNumber," Scan ",scanNum," ",rpm," rpm",sep=""),
+      r = scanDf$r,
+      Ar = scanDf$Ar,
       r0=NA,
       w = w,
       temp = temp,
       R = R,
-      theta = w^2 / (2*R*temp)
-    ) %>% mutate_all(as.numeric)
-    dfValues$Name <- scanName
-    dfValues$File <- file[x]
-    dfValues$CellScanSpeed <- paste("Cell ",cellNumber," Scan ",scanNum," ",rpm," rpm",sep="")
+      theta = w^2 / (2*R*temp),
+      Noise=scanDf$noise,
+      File = file[x]
+    ) %>% mutate(across(-c("Name","CellScanSpeed","File"),as.numeric))
     
-    naInds <- which(is.na(dfValues$Ar))
-    if(length(naInds)>0){
-      curatedValues <- dfValues[-naInds,]
-    } else{
-      curatedValues <- dfValues
-    }
-    
-    return(curatedValues)
-    
+    return(dfValues)
   }
   out <- lapply(1:length(file),readAScan,file=file,filenames=filenames)
   
   # Get scan names
-  scanNames <- lapply(out,'[[','AbsoluteScan')%>%unlist()%>%unique()
+  scanNames <- lapply(out,'[[','AbsoluteScan')%>%
+    unlist()%>%
+    unique()
   names(out) <- scanNames
   
   return(out)

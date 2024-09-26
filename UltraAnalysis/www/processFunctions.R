@@ -241,26 +241,30 @@ renderScanPlot <- function(input,output,selectedSector=NULL,sectorLabel=NULL,bot
     
     inScan <- subset(savedSectorsDf,Scan==dataList$selectedScan)
     
-    # Get data within ranges
-    dataInRange <- lapply(1:nrow(inScan),function(x){
+    if(nrow(inScan)>0){
       
-      row <- inScan[x,]
+      # Get data within ranges
+      dataInRange <- lapply(1:nrow(inScan),function(x){
+        
+        row <- inScan[x,]
+        
+        sub <- subset(scanDataToPlot,r>=row$Min&r<=row$Max)
+        
+        if(nrow(sub)==0){
+          return(NULL)
+        }
+        
+        sub$Color <- row$Color
+        return(sub)
+        
+      }) %>% bind_rows()
       
-      sub <- subset(scanDataToPlot,r>=row$Min&r<=row$Max)
-      
-      if(nrow(sub)==0){
-        return(NULL)
+      if(nrow(dataInRange)>0){
+        currentScanPlot <- currentScanPlot + 
+          geom_point(data=dataInRange,aes(x=r,y=Ar,col=Color))+
+          scale_color_identity()
       }
       
-      sub$Color <- row$Color
-      return(sub)
-      
-    }) %>% bind_rows()
-    
-    if(nrow(dataInRange)>0){
-      currentScanPlot <- currentScanPlot + 
-        geom_point(data=dataInRange,aes(x=r,y=Ar,col=Color))+
-        scale_color_identity()
     }
     
   }
@@ -393,7 +397,7 @@ createSector <- function(scanNumber,data,receptor=0){
   sectorID <- paste('r',randNum,sep="")
   rangeID <- paste('a',randNum,sep="")
   
-  sector <- data.frame(
+  sector <- tibble(
     Scan=scanNumber,
     Min=min(data$r),
     Max=max(data$r),
