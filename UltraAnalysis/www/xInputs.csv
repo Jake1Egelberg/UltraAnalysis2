@@ -1,0 +1,5 @@
+Input,Key,Default
+input$mwInput,mwValue,80000
+input$psvInput,psvValue,0.71
+input$sdInput,sdValue,1.003
+input$nInput,nValue,2

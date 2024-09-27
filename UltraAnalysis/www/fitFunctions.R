@@ -1,3 +1,5 @@
+# Read default fit inputs
+.GlobalEnv$userInputs <- read_csv('www/xInputs.csv',show_col_types =FALSE)
 
 # Define fit function boilerplate
 fitFunction <- "
@@ -26,8 +28,14 @@ renderModelTypeSelection<-function(output,model){
 # Create generic check for input function
   # If input not formatted properly, then updates data list with default and returns FALSE
   # If input formatted properly, updates data list with input and returns true
-checkNumericInput <- function(input,output,dataListKey,default){
+checkNumericInput <- function(key,input,output,dataListKey,default){
  
+  print(key)
+  # Get input for key
+  correspondingInput <- subset(userInputs,Key==key)
+  
+  # Get user input
+  
   # Check for null or empty string
   failedCheck <- length(input)==0 || input=="" || is.na(as.numeric(input))
   
@@ -53,8 +61,8 @@ checkForInputs <- function(input,output){
   }
   
   # Get psv and sd inputs
-  checkNumericInput(input$psvInput,output,'psvValue',0.71)
-  checkNumericInput(input$sdInput,output,'sdValue',1.003)
+  checkNumericInput(key='psvValue',input$psvInput,output,'psvValue',0.71)
+  checkNumericInput(key='sdValue',input$sdInput,output,'sdValue',1.003)
  
   # Get saved sectors
   savedSectors <- dataList$savedSectors 
@@ -73,9 +81,9 @@ checkForInputs <- function(input,output){
   checkMonomerNmer <- function(input,output){
     
     # Check fit-specific inputs
-    checkNumericInput(input$mwInput,output,'mwValue',80000)
-    checkNumericInput(input$nInput,output,'nValue',2)
-    checkNumericInput(input$eCoefInput,output,'eCoefValue',76000)
+    checkNumericInput(key='mwValue',input$mwInput,output,'mwValue',80000)
+    checkNumericInput(key='nValue',input$nInput,output,'nValue',2)
+    checkNumericInput(key='eCoefValue',input$eCoefInput,output,'eCoefValue',76000)
     
   }
 
@@ -92,11 +100,12 @@ defineFitParms <- function(input,output){
   modelFile <- modelFiles[str_detect(modelFiles,selectedModelCur)]
   
   # Load model
+  #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer.txt"
   loadedModel <- read_lines(modelFile)
   modelTibble <- data.frame(loadedModel) %>% 
     t() %>%
-    `colnames<-`(c("Model","Local","Global")) %>%
+    `colnames<-`(c("Model","Local","Global","Inputs")) %>%
     as_tibble()
     
   # Extract model variables
@@ -109,6 +118,16 @@ defineFitParms <- function(input,output){
   localParms <- strsplit(modelTibble$Local,',') %>% unlist()
   globalParms <- strsplit(modelTibble$Global,',') %>% unlist()
   dataCols <- c(modelVariables[!modelVariables%in%c(localParms,globalParms)],"ID")
+  
+  # Format added parms
+  if(modelTibble$Inputs=="NA"){
+    addedParms <- NULL
+  } else{
+    
+    # Extract all inputs to check
+    checkInputs <- str_extract_all(modelTibble$Inputs, "input\\$\\w+")[[1]] %>% unique()
+    
+  }
   
   if(dataList$selectedModel=='MW / Single ideal species'){
     
