@@ -292,7 +292,7 @@ renderScanPlot <- function(input,output,selectedSector=NULL,sectorLabel=NULL,bot
 renderSelectedSectorPlots <- function(input,output,currentScanData,selectedSector){
   
   # Get sector data from scan data
-  sectorData <- subset(currentScanData,r>selectedSector$xmin&r<selectedSector$xmax)
+  sectorData <- subset(currentScanData,r>=selectedSector$xmin&r<=selectedSector$xmax)
   
   if(nrow(sectorData)==0){
     return()
