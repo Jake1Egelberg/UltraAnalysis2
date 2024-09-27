@@ -219,5 +219,19 @@ renderScanPlots <- function(input,output,defaultScansToAnalyze=NULL){
   
 }
 
+# Render upload information
+renderUploadInformation <- function(output){
+  
+  scansLoaded <- length(dataList$scanData)
+  uploadType <- dataList$uploadType
+  dataPoints <- lapply(dataList$scanData,nrow)%>%unlist()%>%sum()
+  
+  uploadDesc <- paste(scansLoaded," scan(s) loaded from ",uploadType," file. n = ",dataPoints,' points of data.',sep='')
+  
+  output$uploadInformation <- renderUI({
+    p(uploadDesc) %>% tagAppendAttributes(style='text-align:center')
+  })
+}
+
 
 

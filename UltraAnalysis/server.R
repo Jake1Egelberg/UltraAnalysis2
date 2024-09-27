@@ -99,7 +99,7 @@ function(input, output, session) {
     progress$set(message='Loading uploaded file...',value=0.1)
     
     if(str_detect(file[1],'.Rdata')){
-      
+    
       if(length(file)>1){
         
         stop <- "You cannot upload multiple .Rdata files at once"
@@ -108,6 +108,7 @@ function(input, output, session) {
         
         # Load to global environment
         load(file,envir=.GlobalEnv)
+        updateDataList('uploadType','Experiment')
         
         # Generate hooks for saved sectors
         savedSectors <- dataList$savedSectors
@@ -122,6 +123,9 @@ function(input, output, session) {
       }
       
     } else{
+      
+      updateDataList('uploadType','Scan')
+      
       # Read each scan
       progress$set(message='Reading scan data...',value=0.5)
       scanData <- readScans(file,filenames)
@@ -134,6 +138,7 @@ function(input, output, session) {
     if(stop==''){
       # Format scan plot output
       renderScanPlots(input,output,defaultScansToAnalyze)
+      renderUploadInformation(output)
       
       # Close progress bar
       progress$close()
