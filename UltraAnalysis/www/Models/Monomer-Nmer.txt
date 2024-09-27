@@ -1,4 +1,5 @@
 Ar <- offset + A0 * exp(1)^( Mb * (w^2 / (2*R*temp)) * (r^2 - r0^2) ) + N * K * A0^N * exp(1)^( N * Mb * (w^2 / (2*R*temp)) * (r^2 - r0^2) )
 A0,offset
 K
-Mb=input$mwInput*(1-input$psvInput*input$sdInput),N=input$nInput
+mwValue,psvValue,sdValue,nValue,eCoefValue
+Mb=mwValue*(1-(psvValue*sdValue)),N=nValue

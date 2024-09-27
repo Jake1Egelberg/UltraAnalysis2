@@ -1,5 +1,6 @@
 Input,Key,Default
-input$mwInput,mwValue,80000
-input$psvInput,psvValue,0.71
-input$sdInput,sdValue,1.003
-input$nInput,nValue,2
+mwInput,mwValue,80000
+psvInput,psvValue,0.71
+sdInput,sdValue,1.003
+nInput,nValue,2
+eCoefInput,eCoefValue,76000

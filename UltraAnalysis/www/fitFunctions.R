@@ -28,25 +28,35 @@ renderModelTypeSelection<-function(output,model){
 # Create generic check for input function
   # If input not formatted properly, then updates data list with default and returns FALSE
   # If input formatted properly, updates data list with input and returns true
-checkNumericInput <- function(key,input,output,dataListKey,default){
+checkNumericInput <- function(key,input,output){
  
-  print(key)
+  # Update console
+  updateString <- paste("Validating input for: ",key,sep="")
+  updateLog(output,updateString)
+  
   # Get input for key
   correspondingInput <- subset(userInputs,Key==key)
   
+  if(nrow(correspondingInput)==0){
+    errorString <- paste("Error checking numeric input: key/input mismatch for: ",key,sep="")
+    tryCatch(updateLog(output,errorString),error=function(e)return())
+    return()
+  }
+  
   # Get user input
+  newInput <- input[[correspondingInput$Input]]
   
   # Check for null or empty string
-  failedCheck <- length(input)==0 || input=="" || is.na(as.numeric(input))
+  failedCheck <- length(newInput)==0 || newInput=="" || is.na(as.numeric(newInput))
   
   
   if(failedCheck){
-    warningString <- paste("<b>Warning</b>: Invalid ",dataListKey," input. Defaulting to ",default,sep="")
+    warningString <- paste("<b>Warning</b>: Invalid ",key," input. Defaulting to ",correspondingInput$Default,sep="")
     updateLog(output,warningString)
-    updateDataList(dataListKey,default)
+    updateDataList(key,correspondingInput$Default)
     return(FALSE)
   } else{
-    updateDataList(dataListKey,as.numeric(input))
+    updateDataList(key,as.numeric(newInput))
     return(TRUE)
   }
   
@@ -60,10 +70,6 @@ checkForInputs <- function(input,output){
     updateDataList('selectedModel',selectedModel)
   }
   
-  # Get psv and sd inputs
-  checkNumericInput(key='psvValue',input$psvInput,output,'psvValue',0.71)
-  checkNumericInput(key='sdValue',input$sdInput,output,'sdValue',1.003)
- 
   # Get saved sectors
   savedSectors <- dataList$savedSectors 
   
@@ -86,6 +92,31 @@ checkForInputs <- function(input,output){
     checkNumericInput(key='eCoefValue',input$eCoefInput,output,'eCoefValue',76000)
     
   }
+  
+  # Define function to calculate columns based on user inputs as additional fit parms
+  calculateAdditionColumns <- function(x){
+    
+    # Get dataList values
+    dataListValues <- dataList[str_detect(x,names(dataList))]
+    
+    # Substitute into equation
+    for(y in 1:length(dataListValues)){x <- gsub(names(dataListValues[y]),as.numeric(dataListValues[y]),x)}
+    
+    # calculate value
+    eqtStartInd <- str_locate(x,'=')[[1]]
+    calculatedValue <- str_sub(x,start=eqtStartInd+1) %>%
+      parse(text=.) %>%
+      eval()
+    
+    # Get value name
+    valueName <- str_sub(x,end=eqtStartInd-1)
+    
+    # Format vector output
+    vectorOutput <- c(calculatedValue)
+    names(vectorOutput) <- valueName
+    
+    return(vectorOutput)
+  }
 
 # Define function parameters
 defineFitParms <- function(input,output){
@@ -102,10 +133,12 @@ defineFitParms <- function(input,output){
   # Load model
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer.txt"
+  #modelFile <- "C:/1_Documents/Ferguson Lab/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer.txt"
+  #modelFile <- "C:/1_Documents/Ferguson Lab/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
   loadedModel <- read_lines(modelFile)
   modelTibble <- data.frame(loadedModel) %>% 
     t() %>%
-    `colnames<-`(c("Model","Local","Global","Inputs")) %>%
+    `colnames<-`(c("Model","Local","Global","Inputs","Mutations")) %>%
     as_tibble()
     
   # Extract model variables
@@ -119,29 +152,21 @@ defineFitParms <- function(input,output){
   globalParms <- strsplit(modelTibble$Global,',') %>% unlist()
   dataCols <- c(modelVariables[!modelVariables%in%c(localParms,globalParms)],"ID")
   
-  # Format added parms
-  if(modelTibble$Inputs=="NA"){
-    addedParms <- NULL
-  } else{
-    
-    # Extract all inputs to check
-    checkInputs <- str_extract_all(modelTibble$Inputs, "input\\$\\w+")[[1]] %>% unique()
-    
-  }
+  # Check necessary inputs
+  inputstoCheck <- strsplit(modelTibble$Inputs,",") %>% 
+    unlist() %>%
+    lapply(checkNumericInput,input=input,output=output)
   
-  if(dataList$selectedModel=='MW / Single ideal species'){
+  # Calculate any necessary additional columns
+  if(modelTibble$Mutations!='NA'){
     
-    # Define added parms for this model
+    # Format mutations to perform
+    addedParms <- strsplit(modelTibble$Mutations,',')[[1]] %>%
+      lapply(calculateAdditionColumns) %>%
+      unlist()
+    
+  } else{
     addedParms <- NULL
-    
-  } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
-    
-    # Check fit-specific inputs
-    checkMonomerNmer(input,output)
-    
-    # Define added parms for this model
-    addedParms <- c("Mb" = dataList$mwValue*(1-(dataList$psvValue*dataList$sdValue)), # Convert MW to Mb
-                    "N" = dataList$nValue)
   }
   
   # Substitute model into fit function
