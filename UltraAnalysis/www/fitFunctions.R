@@ -25,6 +25,36 @@ renderModelTypeSelection<-function(output,model){
   })
 }
 
+# Render model parms
+renderModelParms <- function(input,output){
+  
+  # Render UI for model parms
+  selectedModel <- input$modelType
+  updateDataList('selectedModel',selectedModel)
+  
+  output$modelParms <- renderUI({
+    
+    if(selectedModel=='Single ideal species'){
+      div(class='column',
+          actionButton('fitData','🏃 Run fit',style='align-self:center')
+      )
+    } else if(selectedModel=='Monomer-Nmer'){
+      div(class='column',
+          textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
+          textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
+          textInput('nInput',NULL,dataList$nValue,300,'N (mers)'),
+          actionButton('fitData','🏃 Run fit',style='align-self:center')
+      )
+    }
+    
+  })
+  
+  output$fitDescription <- renderText({
+    paste("Global fit for: ",dataList$selectedModel,sep="")
+  })
+  
+}
+
 # Create generic check for input function
   # If input not formatted properly, then updates data list with default and returns FALSE
   # If input formatted properly, updates data list with input and returns true
@@ -32,7 +62,7 @@ checkNumericInput <- function(key,input,output){
  
   # Update console
   updateString <- paste("Validating input for: ",key,sep="")
-  updateLog(output,updateString)
+  #updateLog(output,updateString)
   
   # Get input for key
   correspondingInput <- subset(userInputs,Key==key)
@@ -56,6 +86,8 @@ checkNumericInput <- function(key,input,output){
     updateDataList(key,correspondingInput$Default)
     return(FALSE)
   } else{
+    validatedString <- paste(key," validated. Applying value of ",as.numeric(newInput),sep="")
+    updateLog(output,validatedString)
     updateDataList(key,as.numeric(newInput))
     return(TRUE)
   }
@@ -83,52 +115,85 @@ checkForInputs <- function(input,output){
   
 }
 
+# Check fit-specific inputs
+checkMonomerNmer <- function(input,output){
+  
   # Check fit-specific inputs
-  checkMonomerNmer <- function(input,output){
+  checkNumericInput(key='mwValue',input$mwInput,output,'mwValue',80000)
+  checkNumericInput(key='nValue',input$nInput,output,'nValue',2)
+  checkNumericInput(key='eCoefValue',input$eCoefInput,output,'eCoefValue',76000)
+  
+}
+
+# Define function to calculate columns based on user inputs as additional fit parms
+calculateAdditionColumns <- function(x,coefs=NULL){
+  
+  # Get index of equals
+  eqtStartInd <- str_locate(x,'=')[[1]]
+  
+  # Get equation after  equals
+  equation <- str_sub(x,start=eqtStartInd+1)
+  
+  # Get dataList values
+  dataListValues <- dataList[str_detect(x,names(dataList))]
+  
+  # Get all identified variables
+  identifiedVariables <- equation %>%
+    str_extract_all("\\b[a-zA-Z]+") %>% unlist()
+  
+  # Check if all identified variables are accounted for, if they are not, then pull from coefs
+  matchInds <- which(identifiedVariables%in%names(dataListValues))
+  lengthOfMatch <- length(matchInds)
+  lengthOfAllVars <- length(identifiedVariables)
+  if(lengthOfMatch!=lengthOfAllVars){
     
-    # Check fit-specific inputs
-    checkNumericInput(key='mwValue',input$mwInput,output,'mwValue',80000)
-    checkNumericInput(key='nValue',input$nInput,output,'nValue',2)
-    checkNumericInput(key='eCoefValue',input$eCoefInput,output,'eCoefValue',76000)
+    # Check that coefs is not null
+    if(length(coefs)==0){
+      tryCatch(updateLog(output,'<b>Fatal error</b>: attempted to pull coef from empty fit'),error=function(e)return())
+      return()
+    }
+    
+    # Get unidentified variables
+    unidentifiedVars <- identifiedVariables[-matchInds]
+    for(i in 1:length(unidentifiedVars)){
+      
+      # Get match from coefs
+      coefMatch <- coefs[which(rownames(coefs)==unidentifiedVars[i]),]
+      
+      if(nrow(coefMatch)==0){
+        tryCatch(updateLog(output,'<b>Fatal error</b>: attempted to pull coef that doesnt exist in fit'),error=function(e)return())
+        return()
+      }
+      
+      # Add to data list values
+      dataListValues[unidentifiedVars[i]] <- coefMatch$Estimate
+    }
     
   }
   
-  # Define function to calculate columns based on user inputs as additional fit parms
-  calculateAdditionColumns <- function(x){
-    
-    # Get dataList values
-    dataListValues <- dataList[str_detect(x,names(dataList))]
-    
-    # Substitute into equation
-    for(y in 1:length(dataListValues)){x <- gsub(names(dataListValues[y]),as.numeric(dataListValues[y]),x)}
-    
-    # calculate value
-    eqtStartInd <- str_locate(x,'=')[[1]]
-    calculatedValue <- str_sub(x,start=eqtStartInd+1) %>%
-      parse(text=.) %>%
-      eval()
-    
-    # Get value name
-    valueName <- str_sub(x,end=eqtStartInd-1)
-    
-    # Format vector output
-    vectorOutput <- c(calculatedValue)
-    names(vectorOutput) <- valueName
-    
-    return(vectorOutput)
-  }
+  # Substitute into equation
+  for(y in 1:length(dataListValues)){equation <- gsub(names(dataListValues[y]),as.numeric(dataListValues[y]),equation)}
+  
+  # calculate value
+  calculatedValue <- equation %>%
+    parse(text=.) %>%
+    eval()
+  
+  # Get value name
+  valueName <- str_sub(x,end=eqtStartInd-1)
+  
+  # Format vector output
+  vectorOutput <- c(calculatedValue)
+  names(vectorOutput) <- valueName
+  
+  return(vectorOutput)
+}
 
 # Define function parameters
 defineFitParms <- function(input,output){
   
-  # Get selected model after slash
-  selectedModelCur <- dataList$selectedModel %>%
-    str_sub(start=str_locate(dataList$selectedModel,'\\/')[[1]]+1) %>%
-    trimws()
-  
   # Identify model file
-  .GlobalEnv$modelFiles <- list.files('www/Models',full.names = TRUE)
-  modelFile <- modelFiles[str_detect(modelFiles,selectedModelCur)]
+  modelFile <- modelFiles[str_detect(modelFiles,dataList$selectedModel)]
   
   # Load model
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
@@ -138,8 +203,9 @@ defineFitParms <- function(input,output){
   loadedModel <- read_lines(modelFile)
   modelTibble <- data.frame(loadedModel) %>% 
     t() %>%
-    `colnames<-`(c("Model","Local","Global","Inputs","Mutations")) %>%
+    `colnames<-`(c("Model","Local","Global","Inputs","Mutations","Displayed","DisplayedUnits")) %>%
     as_tibble()
+  .GlobalEnv$modelTibble <- modelTibble
     
   # Extract model variables
   rawModelVariables <- str_replace_all(modelTibble$Model,'[^[:alpha:]|0]|exp'," ") %>%
@@ -157,14 +223,15 @@ defineFitParms <- function(input,output){
     unlist() %>%
     lapply(checkNumericInput,input=input,output=output)
   
+  # Re-render input text boxes with new values
+  renderModelParms(input,output)
+  
   # Calculate any necessary additional columns
   if(modelTibble$Mutations!='NA'){
-    
     # Format mutations to perform
     addedParms <- strsplit(modelTibble$Mutations,',')[[1]] %>%
       lapply(calculateAdditionColumns) %>%
       unlist()
-    
   } else{
     addedParms <- NULL
   }
@@ -179,6 +246,8 @@ defineFitParms <- function(input,output){
   out$globalParms <- globalParms
   out$addedParms <- addedParms
   out$fitFunction <- fitFunctionWithModel
+  out$displayedValue <- modelTibble$Displayed
+  out$displayedUnits <- modelTibble$DisplayedUnits
   
   return(out)
 }
@@ -457,23 +526,21 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
   nonlinear <- plotNonlinearFit(output,globalFitDup)
   residuals <- plotNonlinearResiduals(output,globalFitDup)
   
-  # Format output based on model
-  if(dataList$selectedModel=='MW / Single ideal species'){
-    coefRow <- fitSummary$coefs[which(rownames(fitSummary$coefs)=='Mb'),]
-    displayedMW <- (coefRow$Estimate / (1-(dataList$psvValue*dataList$sdValue)))/1000
-    displayedMWErr <- (coefRow$`Std. Error` / (1-(dataList$psvValue*dataList$sdValue)))/1000
-    displayedText <- paste(
-      "MW = ",round(displayedMW,1)," +/- ",round(displayedMWErr,1)," kDa",sep=""
-    )
-  } else if(dataList$selectedModel=='Kd / Monomer-Nmer'){
-    coefRow <- fitSummary$coefs[which(rownames(fitSummary$coefs)=='K'),]
-    displayedKd <- ((1/coefRow$Estimate)*(dataList$nValue/dataList$eCoefValue))*1000000
-    displayedKdErr <- (coefRow$`Std. Error`/coefRow$Estimate)*displayedKd
-    displayedText <- paste(
-      "Kd = ",round(displayedKd,2)," +/- ",round(displayedKdErr,2)," uM",sep=""
-    )
-  }
+  # Get global parm fit coefs
+  globalCoef <- fitSummary$coefs[which(rownames(fitSummary$coefs)==fitParms$globalParms),]
   
+  # Calculate displayed value
+  displayedValue <- fitParms$displayedValue %>%
+    lapply(calculateAdditionColumns,coefs=fitSummary$coefs) %>%
+    unlist()
+  
+  # Propagate error
+  displayedValueError <- (globalCoef$`Std. Error`/globalCoef$Estimate)*as.numeric(displayedValue)
+    
+  # Format displayed text
+  displayedText <- paste(names(displayedValue),' = ',round(as.numeric(displayedValue),1)," +/- ", round(displayedValueError,1)," ",fitParms$displayedUnits,sep="")
+
+  # Generate row to display fit coefficients
   parmRow <- div(
     p(HTML(displayedText),style='padding-left:10px;'),
     renderTable(fitSummary$coefs,rownames = TRUE)

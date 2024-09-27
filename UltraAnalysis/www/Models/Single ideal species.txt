@@ -3,3 +3,5 @@ A0,offset
 Mb
 sdValue,psvValue
 NA
+MW = (Mb/(1-(sdValue*psvValue)))/1000
+kDa

@@ -1,0 +1,7 @@
+Model function
+Local parameters
+Global parameters
+User inputs necessary for model fitting
+Calculations from user inputs necessary for model fitting
+Calculations of final parameters to display (function of global parameters and user inputs)
+Units of final parameters to display

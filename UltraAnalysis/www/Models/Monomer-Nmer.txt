@@ -3,3 +3,5 @@ A0,offset
 K
 mwValue,psvValue,sdValue,nValue,eCoefValue
 Mb=mwValue*(1-(psvValue*sdValue)),N=nValue
+Kd=(1/K)*(nValue/eCoefValue)*1000000
+uM

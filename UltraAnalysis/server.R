@@ -7,8 +7,13 @@ source('www/fitFunctions.R')[[1]]
 source('www/logFunctions.R')[[1]]
 
 # Define model types and default variables
-.GlobalEnv$modelTypes <- c("MW / Single ideal species",
-                           "Kd / Monomer-Nmer")
+.GlobalEnv$modelFiles <- list.files('www/Models',full.names = TRUE)
+.GlobalEnv$modelTypes <- list.files('www/Models',full.names = FALSE) %>%
+  gsub('.txt','',.) %>%
+  .[-length(.)] %>% 
+  rev()
+  
+  
 .GlobalEnv$fitPlotWidth <- 290
 .GlobalEnv$fitPlotHeight <- 300
 defineVars()
@@ -317,30 +322,7 @@ function(input, output, session) {
   # When user selects a model type
   observeEvent(input$modelType,{
   
-    # Render UI for model parms
-    selectedModel <- input$modelType
-    updateDataList('selectedModel',selectedModel)
-    
-    output$modelParms <- renderUI({
-      
-      if(selectedModel=='MW / Single ideal species'){
-        div(class='column',
-          actionButton('fitData','🏃 Run fit',style='align-self:center')
-        )
-      } else if(selectedModel=='Kd / Monomer-Nmer'){
-        div(class='column',
-            textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
-            textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
-            textInput('nInput',NULL,dataList$nValue,300,'N (mers)'),
-            actionButton('fitData','🏃 Run fit',style='align-self:center')
-          )
-      }
-      
-    })
-    
-    output$fitDescription <- renderText({
-      paste("Global fit for: ",dataList$selectedModel,sep="")
-    })
+    renderModelParms(input,output)
     
   })
   
@@ -357,6 +339,12 @@ function(input, output, session) {
     .GlobalEnv$progress <- shiny::Progress$new()
     progress$set(message='Fitting data...',value=0.5)
     
+    # Update log
+    timestamp <- as.POSIXct(Sys.time(),tz='America/New_York') %>%
+      format('%Y-%m-%d %H:%M:%S') %>%
+      as.character()
+    fitLog <- paste("<b>",timestamp," - Initiating fit for ",dataList$selectedModel,"</b>",sep="")
+    tryCatch(updateLog(output,fitLog),error=function(e)return())
     
     # Get saved sectors
     savedSectors <- dataList$savedSectors 
