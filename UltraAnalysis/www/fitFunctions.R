@@ -570,11 +570,21 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
     lapply(
       displayedText,
       function(x){
-        p(HTML(x),style='padding-left:10px;')
+        p(HTML(x))
       }
     ),
-    renderTable(fitSummary$coefs,rownames = TRUE)
+    renderUI({
+      div(
+        style='background-color:white',
+        HTML(tab_model(globalFit,p.style='stars',title=dataList$selectedModel,dv.labels = '',string.pred="Parameters",show.ci=FALSE,show.se=TRUE)$knitr)
+      )
+      })
+    #renderTable(fitSummary$coefs,rownames = TRUE)
   )
+  
+  
+  
+  
   
   # Return out list
   outlist <- list()
@@ -623,7 +633,7 @@ renderFitOutput <- function(output){
       ),
       div(
         class='column',style='margin-left:15px',
-        div(class='row',style=paste('overflow-y: auto;height:',fitPlotHeight/2,'px;',sep=""),
+        div(class='row',style=paste('overflow-y: auto;height:',fitPlotHeight*0.7,'px;margin-left:5px',sep=""),
             fit$description
         ),
         div(
@@ -632,10 +642,9 @@ renderFitOutput <- function(output){
         ),
         div(
           class='row',style='align-self:flex-end;',
-          downloadButton("downloadFit","Fit data",icon=icon('database'))
-        ),
-        div(
-          class='row',style='align-self:flex-end;margin-top:10px',
+          div(style='margin-right:10px;',
+            downloadButton("downloadFit","Fit data",icon=icon('database'))
+          ),
           downloadButton("downloadExperiment","Experiment file",icon=icon('flask'))
         ),
       )

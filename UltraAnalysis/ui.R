@@ -9,6 +9,7 @@ library(dplyr)
 library(ggplot2)
 library(ggprism)
 library(cowplot)
+library(sjPlot)
 
 # Nonlinear fits
 library(gslnls)
