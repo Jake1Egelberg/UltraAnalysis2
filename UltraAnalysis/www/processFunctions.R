@@ -10,6 +10,100 @@ retrieveScanData <- function(){
   
 }
 
+# Function to calculate derivative
+derive <- function(x){
+  out <- c(0,diff(x))
+  return(out)
+}
+
+# Extract data for each sector
+extractSectorData <- function(sector,tmp,absoluteScanNumber,input,output,session){
+  
+  sectorData <- subset(tmp,Sector==sector)
+
+  sectorData <- sectorData %>% 
+    mutate(x = r^2,
+           y= suppressWarnings(log(Ar)))
+  
+  # Define group size as 25% of sector
+  n <- ceiling(nrow(sectorData)*0.25)
+  errList <- lapply(1:(nrow(sectorData)-n),function(y){
+    
+    sub <- sectorData[y:(y+n),]
+    
+    # Skip fits for data with NA or -Inf
+    badInds <- which(is.na(sub$y)|sub$y==-Inf)
+    if(length(badInds)>0){
+      out <- list()
+      out$metrics <- NA
+      return(out)
+    }
+    
+    # Format for lm.fit
+    X <- cbind(1, as.matrix(sub$x))
+    
+    # Get linear fit for group 3
+    subFit <- .lm.fit(X,sub$y)
+    
+    # # Get predictions
+    # preds <- predict(tempFit,data.frame(r=sub$r,w=sub$w,R=sub$R,temp=sub$temp,r0=sub$r0))
+    # 
+    # Get proxy for normality of residuals as mean over median
+    fitResiduals <- (subFit$residuals)
+    
+    # Get if normally distributed
+    normalTest <- shapiro.test(fitResiduals)
+    
+    # Calcualte rsqr
+    meanErr <- sum((sub$y-mean(sub$y,na.rm=TRUE))^2)
+    pErr <- sum((fitResiduals^2))
+    rsqr <- 1-(pErr/meanErr)
+    
+    # Calculate metric weighting distance to 1 by GoF
+    outMetrics <-  (1-rsqr) * (1-normalTest$statistic[[1]])
+    
+    # Save output in list
+    outlist <- list()
+    outlist$data <- sub
+    outlist$metrics <- outMetrics
+    outlist$rsqr <- rsqr
+    outlist$W <- normalTest$statistic[[1]]
+    outlist$coef <- subFit$coefficients
+    
+    return(outlist)
+    
+  }) 
+  errs <- unlist(lapply(errList,'[[','metrics'))
+  
+  # Get which minimizes err
+  minInd <- which(errs==min(errs,na.rm=TRUE))[1]
+  
+  # Get best set of data
+  bestData <- errList[[minInd]]
+  
+  # Plot
+  bestFit <- function(x,slope,intercept){
+    y <- x*slope+intercept
+    return(r)
+  }
+  meniscusData <- bestData$data
+  plotForBugfixing <- ggplot(meniscusData,
+                             aes(x=r^2,y=log(Ar)))+
+    geom_point()+
+    geom_abline(slope=bestData$coef[[2]],intercept=bestData$coef[[1]],col='red')+
+    theme_prism()
+  
+  # Format as range
+  rangeFormatList <- createSector(absoluteScanNumber,meniscusData)
+  rangeFormat <- rangeFormatList$sector
+
+  # Create hook for editing 
+  generateSectorHooks(input,output,session,rangeFormat)
+  
+  return(rangeFormat)
+  
+}
+
 # Automatically find the meniscus
 findMenisci <- function(x,input,output,session,allScanData){
   
@@ -27,121 +121,33 @@ findMenisci <- function(x,input,output,session,allScanData){
                value=(x-1)/length(allScanData))
   
   # Get derivative for clustering
-  tmp$Dr <- c(0,diff(tmp$Ar))
-  
-  # Get mean derivative
-  meanDr <- mean(tmp$Dr)
-  tmp$meanDr <- meanDr
-  
+  tmp <- tmp %>% mutate(
+    Dr = derive(Ar), 
+    meanDr = mean(Dr), 
+    clusterValue = sqrt(Dr^2 + r^2)
+    )
+
   # Cluster into 3 groups by x,y position
-  clustVec <- sqrt(tmp$Dr^2+tmp$r^2)
-  kclust <- kmeans(clustVec,sectorNum)
+  clustVec <- tmp$clusterValue
+  kclust <- kmeans(clustVec, sectorNum)
   clusterVector <- kclust$cluster
   
   # ORder cluster vector from small to large to keep conssitent
   clusterVectorOrdered <- clusterVector[order(clusterVector)]
   
+  # Add ordered sectors
   tmp$Sector <- clusterVectorOrdered
   
-  # Plot clusters
+  # Plot clusters for bugfixings
   clusterPlot <- ggplot(tmp,aes(x=r,y=Ar))+
     #geom_line()+
     geom_point(data=tmp,aes(y=Dr,col=as.character(Sector)))+
-    geom_hline(yintercept=meanDr,col='red')+
+    geom_hline(aes(yintercept=meanDr),col='red')+
     theme_prism()
   
-  # Get sectors
-  autoRanges <- lapply(1:sectorNum,function(sector){
-    
-    rawSectorData <- subset(tmp,Sector==sector)
-    
-    # Transform sector data to be linear
-    sectorData <- data.frame(
-      x = (rawSectorData$r^2),
-      y = suppressWarnings(log(rawSectorData$Ar))
-    )
-    
-    # Split data into groups of 10 datapoints
-    n <- ceiling(nrow(sectorData)*0.25)
-    errList <- lapply(1:(nrow(sectorData)-n),function(y){
-      
-      rawSub <- rawSectorData[y:(y+n),]
-      sub <- sectorData[y:(y+n),]
-      
-      # Skip fits for data with NA or -Inf
-      badInds <- which(is.na(sub$y)|sub$y==-Inf)
-      if(length(badInds)>0){
-        out <- list()
-        out$metrics <- NA
-        return(out)
-      }
-      
-      # Format for lm.fit
-      X <- cbind(1, as.matrix(sub$x))
-      
-      # Get linear fit for group 3
-      subFit <- .lm.fit(X,sub$y)
-      
-      # # Get predictions
-      # preds <- predict(tempFit,data.frame(r=sub$r,w=sub$w,R=sub$R,temp=sub$temp,r0=sub$r0))
-      # 
-      # Get proxy for normality of residuals as mean over median
-      fitResiduals <- (subFit$residuals)
-      
-      # Get if normally distributed
-      normalTest <- shapiro.test(fitResiduals)
-      
-      # Calcualte rsqr
-      meanErr <- sum((sub$y-mean(sub$y,na.rm=TRUE))^2)
-      pErr <- sum((fitResiduals^2))
-      rsqr <- 1-(pErr/meanErr)
-      
-      # Calculate metric weighting distance to 1 by GoF
-      outMetrics <-  (1-rsqr) * (1-normalTest$statistic[[1]])
-      
-      # Save output in list
-      outlist <- list()
-      outlist$data <- rawSub
-      outlist$metrics <- outMetrics
-      outlist$rsqr <- rsqr
-      outlist$W <- normalTest$statistic[[1]]
-      outlist$coef <- subFit$coefficients
-      
-      return(outlist)
-      
-    }) 
-    errs <- unlist(lapply(errList,'[[','metrics'))
-    
-    # Get which minimizes err
-    minInd <- which(errs==min(errs,na.rm=TRUE))[1]
-    
-    # Get best set of data
-    bestData <- errList[[minInd]]
-    
-    # Plot
-    bestFit <- function(x,slope,intercept){
-      y <- x*slope+intercept
-      return(r)
-    }
-    meniscusData <- bestData$data
-    plotForBugfixing <- ggplot(meniscusData,
-                               aes(x=r^2,y=log(Ar)))+
-      geom_point()+
-      geom_abline(slope=bestData$coef[[2]],intercept=bestData$coef[[1]],col='red')+
-      theme_prism()
-    
-    # Format as range
-    rangeFormatList <- createSector(absoluteScanNumber,meniscusData)
-    rangeFormat <- rangeFormatList$sector
-    sectorID <- rangeFormatList$id
-    
-    # Create hook for editing 
-    generateSectorHooks(input,output,session,rangeFormat)
-    
-    return(rangeFormat)
-    
-    
-  }) %>% bind_rows()
+  # Get data for each sector
+  autoRanges <- lapply(1:sectorNum,extractSectorData,tmp,absoluteScanNumber,input,output,session) %>% 
+    bind_rows()
   
   tryCatch(updateLog(output,paste("Sector finding complete for scan ",scanNumber,sep="")),error=function(e)return())
   

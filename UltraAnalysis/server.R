@@ -11,8 +11,6 @@ source('www/logFunctions.R')[[1]]
                            "Kd / Monomer-Nmer")
 .GlobalEnv$fitPlotWidth <- 290
 .GlobalEnv$fitPlotHeight <- 300
-psv <- 0.71
-sd <- 1.003
 defineVars()
 
 # Define server logic required to draw a histogram
@@ -372,7 +370,7 @@ function(input, output, session) {
     
     # Define parameters of fit
       # Returns fit function among other things depending on selected model to fit
-    .GlobalEnv$fitParms <- defineFitParms(input)
+    .GlobalEnv$fitParms <- defineFitParms(input,output)
     
     # Processes sector data per fit function, adding parms accordingly
     processedSectors <- lapply(1:length(savedSectors),
