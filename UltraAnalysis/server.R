@@ -56,12 +56,7 @@ function(input, output, session) {
   
   # Observe a tab switch
   observeEvent(input$tabSwitch,{
-    
-    if(input$tabSwitch=='upload'){
-      renderPsvInput(output)
-      renderSdInput(output)
-    }
-    
+
     if(input$tabSwitch=='process'){
       renderScanSelection(output)
       renderScanPlot(input,output)
@@ -139,10 +134,6 @@ function(input, output, session) {
     if(stop==''){
       # Format scan plot output
       renderScanPlots(input,output,defaultScansToAnalyze)
-      
-      # Render global inputs
-      renderPsvInput(output)
-      renderSdInput(output)
       
       # Close progress bar
       progress$close()
@@ -346,20 +337,21 @@ function(input, output, session) {
     fitLog <- paste("<b>",timestamp," - Initiating fit for ",dataList$selectedModel,"</b>",sep="")
     tryCatch(updateLog(output,fitLog),error=function(e)return())
     
+    if(length(dataList$selectedModel)==0){
+      updateDataList('selectedModel','Single ideal species')
+    }
+    
+    # Define parameters of fit
+    # Returns fit function among other things depending on selected model to fit
+
+    .GlobalEnv$fitParms <- defineFitParms(input,output)
+    
     # Get saved sectors
     savedSectors <- dataList$savedSectors 
     
     # Get all absolute scans
     allScans <- unique(lapply(dataList$scanData,'[[','AbsoluteScan') %>% unlist())
-    
-    if(length(dataList$selectedModel)==0){
-      updateDataList('selectedModel','MW / Single ideal species')
-    }
-    
-    # Define parameters of fit
-      # Returns fit function among other things depending on selected model to fit
-    .GlobalEnv$fitParms <- defineFitParms(input,output)
-    
+
     # Processes sector data per fit function, adding parms accordingly
     processedSectors <- lapply(1:length(savedSectors),
                                calculateReferenceRadius,
@@ -372,13 +364,13 @@ function(input, output, session) {
       tryCatch(updateLog(output,"Error fitting baselines"),error=function(e)return())
       return()
     }
-    
+
     # Combine into 1 global dataset
     globalData <- processedSectors %>% bind_rows()
 
     # Dynamically render fit function from parms
     processedFitFunction <- processFitFunction(fitParms,globalData)
-   
+  
     # Do fit
     startTime <- Sys.time()
     globalFit <- eval(parse(text=processedFitFunction$fitString))

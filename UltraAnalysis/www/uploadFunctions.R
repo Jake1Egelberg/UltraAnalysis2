@@ -73,18 +73,6 @@ readScans <- function(file,filenames){
   
 }
 
-# Render psv input
-renderSdInput <- function(output){
-  output$sdInputArea <- renderUI({
-    textInput('sdInput',NULL,dataList$sdValue,300,'Solvent density (g/mL)')
-  })
-}
-renderPsvInput <- function(output){
-  output$psvInputArea <- renderUI({
-    textInput('psvInput',NULL,dataList$psvValue,300,'Partial specific volume (mL/g)')
-  })
-}
-
 # Function when someone checks a scan to include
 includeScan <- function(input,scanDataInd,scanNumber){
   

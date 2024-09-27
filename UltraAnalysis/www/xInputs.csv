@@ -1,6 +1,7 @@
-Input,Key,Default
-mwInput,mwValue,80000
-psvInput,psvValue,0.71
-sdInput,sdValue,1.003
-nInput,nValue,2
-eCoefInput,eCoefValue,76000
+Input,Key,Default,Placeholder
+mwInput,mwValue,80000,Monomer MW (Da)
+psvInput,psvValue,0.71,Partial specific volume (mL/g)
+sdInput,sdValue,1.003,Solvent density (g/mL)
+nInput,nValue,2,N (mers)
+eCoefInput,eCoefValue,76000,Ext. Coef. (M^-1cm^-1)
+mInput,mValue,4,M (mers)

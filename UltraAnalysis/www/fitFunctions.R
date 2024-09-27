@@ -25,6 +25,21 @@ renderModelTypeSelection<-function(output,model){
   })
 }
 
+# Define function to get model file from selected model type
+getModelInfo <- function(modelFile=NULL){
+  
+  if(length(modelFile)==0){
+    modelFile <- modelFiles[str_detect(modelFiles,paste(dataList$selectedModel,'.txt',sep=""))]
+  } 
+  
+  loadedModel <- read_lines(modelFile)
+  modelTibble <- data.frame(loadedModel) %>% 
+    t() %>%
+    `colnames<-`(c("Model","Local","Global","Inputs","Mutations","Displayed","DisplayedUnits")) %>%
+    as_tibble()
+  return(modelTibble)
+}
+
 # Render model parms
 renderModelParms <- function(input,output){
   
@@ -32,20 +47,26 @@ renderModelParms <- function(input,output){
   selectedModel <- input$modelType
   updateDataList('selectedModel',selectedModel)
   
+  # Get model tibble 
+  modelTibble <- getModelInfo()
+  # Get inputs
+  inputs <- strsplit(modelTibble$Inputs,',') %>% unlist()
+  
   output$modelParms <- renderUI({
     
-    if(selectedModel=='Single ideal species'){
-      div(class='column',
-          actionButton('fitData','🏃 Run fit',style='align-self:center')
-      )
-    } else if(selectedModel=='Monomer-Nmer'){
-      div(class='column',
-          textInput('mwInput',NULL,dataList$mwValue,300,'MW (Da)'),
-          textInput('eCoefInput',NULL,dataList$eCoefValue,300,'Extinction coef. (M^-1cm^-1)'),
-          textInput('nInput',NULL,dataList$nValue,300,'N (mers)'),
-          actionButton('fitData','🏃 Run fit',style='align-self:center')
-      )
-    }
+
+    div(class='column',style='height:250px;overflow-y:auto;',
+        actionButton('fitData','🏃 Run fit',style='align-self:center;margin-bottom:10px;margin-top:10px;'),
+        div(
+          lapply(seq_along(inputs),function(x){
+            tmpInput <- inputs[x]
+            tmpCorrespondingRow <- subset(userInputs,Key==tmpInput)
+            tmpCorrespondingValue <- as.numeric(dataList[str_detect(tmpInput,names(dataList))])
+            
+            textInput(tmpCorrespondingRow$Input,NULL,tmpCorrespondingValue,300,tmpCorrespondingRow$Placeholder)
+          })
+        )
+    )
     
   })
   
@@ -193,31 +214,30 @@ calculateAdditionColumns <- function(x,coefs=NULL){
 defineFitParms <- function(input,output){
   
   # Identify model file
-  modelFile <- modelFiles[str_detect(modelFiles,dataList$selectedModel)]
-  
+  modelFile <- modelFiles[str_detect(modelFiles,paste(dataList$selectedModel,'.txt',sep=""))]
+
   # Load model
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
   #modelFile <- "C:/Users/Jake/Documents/Code/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer.txt"
   #modelFile <- "C:/1_Documents/Ferguson Lab/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer.txt"
   #modelFile <- "C:/1_Documents/Ferguson Lab/UltraAnalysis2/UltraAnalysis/www/Models/Single ideal species.txt"
-  loadedModel <- read_lines(modelFile)
-  modelTibble <- data.frame(loadedModel) %>% 
-    t() %>%
-    `colnames<-`(c("Model","Local","Global","Inputs","Mutations","Displayed","DisplayedUnits")) %>%
-    as_tibble()
+  #modelFile <- "C:/1_Documents/Ferguson Lab/UltraAnalysis2/UltraAnalysis/www/Models/Monomer-Nmer-Mmer.txt"
+  modelTibble <- getModelInfo(modelFile)
   .GlobalEnv$modelTibble <- modelTibble
-    
-  # Extract model variables
-  rawModelVariables <- str_replace_all(modelTibble$Model,'[^[:alpha:]|0]|exp'," ") %>%
-    strsplit(" ") %>%
-    unlist()
-  modelVariables <- unique(rawModelVariables[rawModelVariables!=""])
   
+
+  # Extract model variables
+  modelVariables <- str_replace_all(modelTibble$Model,'[^[:alpha:]|0]|exp'," ") %>%
+    strsplit(" ") %>%
+    unlist() %>%
+    unique() %>%
+    .[.!=""]
+
   # Define as data, local, or global per file
   localParms <- strsplit(modelTibble$Local,',') %>% unlist()
   globalParms <- strsplit(modelTibble$Global,',') %>% unlist()
   dataCols <- c(modelVariables[!modelVariables%in%c(localParms,globalParms)],"ID")
-  
+
   # Check necessary inputs
   inputstoCheck <- strsplit(modelTibble$Inputs,",") %>% 
     unlist() %>%
@@ -313,6 +333,9 @@ processFitFunction <- function(fitParms,globalData){
   globalParms <- fitParms$globalParms
   localParms <- fitParms$localParms
   
+  # Collapse global parms
+  globalParmsList <- paste(globalParms,collapse=',')
+  
   # Collapse data columns into a vector for insertion into dynamic fit string
   dataColumnList <- paste(dataCols,collapse=',')
   
@@ -338,7 +361,7 @@ processFitFunction <- function(fitParms,globalData){
   dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitParms$fitFunction)
   dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
   dynamicFitFunction <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitFunction)
-  dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitFunction)
+  dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParmsList,dynamicFitFunction)
   
   # Load into real function
   loadedFunction <- eval(parse(text=dynamicFitFunction))
@@ -349,7 +372,7 @@ processFitFunction <- function(fitParms,globalData){
         gsl_nls(
           Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
           data=globalData,
-          algorithm='lmaccel',
+          algorithm='lm',
           start=START_STRING,
           control=gsl_nls_control(maxiter=1000)
         )
@@ -357,7 +380,7 @@ processFitFunction <- function(fitParms,globalData){
   
   # Insert parms into command
   dynamicFitString <- gsub('DATA_COLUMNS',dataColumnList,fitString)
-  dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParms,dynamicFitString)
+  dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParmsList,dynamicFitString)
   dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitString)
   dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
   
@@ -531,6 +554,8 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
   
   # Calculate displayed value
   displayedValue <- fitParms$displayedValue %>%
+    strsplit(',') %>%
+    unlist() %>%
     lapply(calculateAdditionColumns,coefs=fitSummary$coefs) %>%
     unlist()
   
@@ -538,11 +563,16 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
   displayedValueError <- (globalCoef$`Std. Error`/globalCoef$Estimate)*as.numeric(displayedValue)
     
   # Format displayed text
-  displayedText <- paste(names(displayedValue),' = ',round(as.numeric(displayedValue),1)," +/- ", round(displayedValueError,1)," ",fitParms$displayedUnits,sep="")
+  displayedText <- paste(names(displayedValue),' = ',round(as.numeric(displayedValue),1)," +/- ",round(displayedValueError,1),sep="")
 
   # Generate row to display fit coefficients
   parmRow <- div(
-    p(HTML(displayedText),style='padding-left:10px;'),
+    lapply(
+      displayedText,
+      function(x){
+        p(HTML(x),style='padding-left:10px;')
+      }
+    ),
     renderTable(fitSummary$coefs,rownames = TRUE)
   )
   

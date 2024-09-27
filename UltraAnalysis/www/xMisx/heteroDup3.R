@@ -15,8 +15,8 @@ mwFunction <- function(r, w, temp, r0, R, A0, Mb, offset){
 # Correct gas constant to units of (g * cm^2) / s^2 * mol * K
 R <- 8.3144 * 1000 * 100 * 100 # (g * cm^2) / s^2 * mol * K
 
-#selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
-selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
+selectedCells <- 'C:/1_Documents/Ferguson Lab/UltraAnalysis/Data/618 WT EGFR/cell4abs.log'
+#selectedCells <- 'C:/Users/Jake/Documents/Code/UltraAnalysis2/Data/cell4abs.log'
 
 # Read selected log file
 readLogFile <- function(selectedCells){
@@ -205,10 +205,7 @@ s2sub <- subset(s2,r>5.9&r<6.1)
 
 # Format list
 rawscanList <- list(s1sub,
-                    s2sub,
-                    s1sub,
-                    s2sub,
-                    s1sub
+                    s2sub
                     )
 
 # calculate reference radii
@@ -243,7 +240,8 @@ fitData <- globalData %>% select(
 )
 
 modelType <- c("MW / Single ideal species",
-               "Kd / A + A <-> AA")[2]
+               "Kd / A + A <-> AA",
+               "Monomer-Nmer-Mmer")[3]
 
 # Define local fit boilerplate
 
@@ -305,6 +303,35 @@ if(modelType=='MW / Single ideal species'){
   fitData$Mb <- 20000
   fitData$N <- 2
   
+} else if(modelType=='Monomer-Nmer-Mmer'){
+  
+  dataCols <- c("r","r0","w","temp","Ar","R","Mb","N","M","ID")
+  localParms <- c("A0","offset")
+  globalParms <- c("Ka","Kb")
+  
+  fitFunction <- "
+    function(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS){
+      LOCAL_FIT_BOILERPLATE
+    
+      theta <- w^2 / (2*R*temp)
+      transA <- log(exp(Ka))
+      transB <- log(exp(Kb))
+            
+      
+      
+      monomerTerm <- A0 * exp(1)^( Mb * theta * (r^2 - r0^2) )
+      dimerTerm <-  N * A0^N * exp(1)^(transA + N * Mb * theta * (r^2 - r0^2) )
+      tetramerTerm <- M * A0^M * exp(1)^(transB + M * Mb * theta * (r^2 - r0^2) )
+      Ar <- offset + monomerTerm + dimerTerm + tetramerTerm
+      
+      return(Ar)
+    }
+  "
+  
+  fitData$Mb <- 20000
+  fitData$N <- 2
+  fitData$M <- 4
+  
 }
 
 # Process parms
@@ -328,7 +355,7 @@ startString <- paste('c(',globalParmListStart,',',localParmListStart,")",sep='')
 dynamicFitFunction <- gsub("LOCAL_FIT_BOILERPLATE",localFitBoilerplate,fitFunction)
 dynamicFitFunction <- gsub('DATA_COLUMNS',dataColumnList,dynamicFitFunction)
 dynamicFitFunction <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitFunction)
-dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',globalParmList,dynamicFitFunction)
+dynamicFitFunction <- gsub('GLOBAL_PARAMETERS',paste(globalParmList,collapse=','),dynamicFitFunction)
 
 # Load into real function
 
@@ -339,7 +366,7 @@ fitString <- "
   gsl_nls(
     Ar~loadedFunction(DATA_COLUMNS,GLOBAL_PARAMETERS,LOCAL_PARAMETERS),
     data=fitData,
-    algorithm='lm',
+    algorithm='lmaccel',
     start=START_STRING,
     control=gsl_nls_control(maxiter=1000)
   )
@@ -347,7 +374,7 @@ fitString <- "
 
 # Configure parameters
 dynamicFitString <- gsub('DATA_COLUMNS',dataColumnList,fitString)
-dynamicFitString <- gsub('GLOBAL_PARAMETERS',globalParmList,dynamicFitString)
+dynamicFitString <- gsub('GLOBAL_PARAMETERS',paste(globalParmList,collapse=","),dynamicFitString)
 dynamicFitString <- gsub('LOCAL_PARAMETERS',localParmListCollapsed,dynamicFitString)
 dynamicFitString <- gsub('START_STRING',startString,dynamicFitString)
 
@@ -371,6 +398,10 @@ sum
 # Print time
 procTime <- as.numeric(difftime(time2,time1,units='secs'))
 print(paste("Fit in ",round(procTime,3),'s',sep=""))
+
+
+
+
 
 readScans <- function(file,filenames){
   
