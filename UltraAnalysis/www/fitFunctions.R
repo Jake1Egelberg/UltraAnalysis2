@@ -484,6 +484,15 @@ plotNonlinearResiduals <- function(output,globalFitDup){
   
 }
 
+# Function to add columns to data from a vector
+addColumnsFromVector <- function(data,columns){
+  for(i in seq_along(columns)){
+    parm <- columns[i]
+    data[,parm] <- NA
+  }
+  return(data)
+}
+
 # Process fit results
 processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms){
   
@@ -501,12 +510,7 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
   tryCatch(updateLog(output,fitSummary$summary),error=function(e){return()})
   
   # Add local and global parm columns to data
-  parmVector <- c(localParms,globalParms)
-  for(i in seq_along(parmVector)){
-    
-    parm <- parmVector[i]
-    globalFitDup[,parm] <- NA
-  }
+  globalFitDup <- addColumnsFromVector(globalFitDup,parmVector)
   
   # Fill columns with data
   allParms <- c(processedFitFunction$localParmList,globalParms)
