@@ -510,7 +510,7 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
   tryCatch(updateLog(output,fitSummary$summary),error=function(e){return()})
   
   # Add local and global parm columns to data
-  globalFitDup <- addColumnsFromVector(globalFitDup,parmVector)
+  globalFitDup <- addColumnsFromVector(globalFitDup,c(localParms,globalParms))
   
   # Fill columns with data
   allParms <- c(processedFitFunction$localParmList,globalParms)
@@ -579,11 +579,11 @@ processFitResults <- function(globalFit,globalData,processedFitFunction,fitParms
     ),
     renderUI({
       div(
-        style='background-color:white',
-        HTML(tab_model(globalFit,p.style='stars',title=dataList$selectedModel,dv.labels = '',string.pred="Parameters",show.ci=FALSE,show.se=TRUE)$knitr)
+        style='background-color:transparent',
+        renderTable(fitSummary$coefs,rownames = TRUE)
+        #HTML(tab_model(globalFit,p.style='stars',title=dataList$selectedModel,dv.labels = '',string.pred="Parameters",show.ci=FALSE,show.se=TRUE)$knitr)
       )
       })
-    #renderTable(fitSummary$coefs,rownames = TRUE)
   )
   
   
